@@ -151,7 +151,10 @@ This project is a Class Schedule Management System designed to help manage and o
             - **Calendar View:** Interactive weekly calendar using `react-big-calendar`.
             - **Events:** Displays assigned classes (recurring) and approved room bookings (one-time).
             - **Event Details:** Shows course code, title, room, and section.
-            - **Google Calendar:** "Sync to Google Calendar" button to export schedule (requires backend OAuth setup).
+            - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
+                - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration (14 weeks).
+                - **Smart Mapping:** Automatically calculates the next occurrence of class days.
+                - **OAuth Integration:** Securely connects to Google via OAuth 2.0.
         - **Edit Profile (`src/pages/teacher/EditProfile.jsx`):**
             - **Profile Management:** Update full name, Initial, Research Interests, Projects, and Contact Details.
             - **Faculty Type:** Set status as **Permanent** or **Adjunct**.

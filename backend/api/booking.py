@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, desc
 from typing import List, Optional
 from datetime import date
+from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_active_user, get_admin_user
@@ -11,6 +12,10 @@ from models.schedule import ClassSchedule
 from models.academic import Room, ClassType
 from models.user import User
 from schemas.booking import BookingRequestCreate, BookingRequest as BookingRequestSchema, BookingRequestUpdate
+
+class BulkBookingAction(BaseModel):
+    action: str
+    ids: Optional[List[int]] = None
 
 router = APIRouter(
     prefix="/bookings",
@@ -141,6 +146,20 @@ def create_booking_request(
     if existing_booking:
         raise HTTPException(status_code=400, detail="Room is already booked or has a pending request at this time.")
 
+    # Check for double booking (User cannot book multiple rooms at the same time)
+    double_booking = db.query(BookingRequest).filter(
+        BookingRequest.user_id == current_user.id,
+        BookingRequest.booking_date == booking.booking_date,
+        BookingRequest.time_slot_id == booking.time_slot_id,
+        or_(
+            BookingRequest.status == BookingStatus.APPROVED,
+            BookingRequest.status == BookingStatus.PENDING
+        )
+    ).first()
+
+    if double_booking:
+        raise HTTPException(status_code=400, detail="You already have a booking request for this time slot.")
+
     new_booking = BookingRequest(
         user_id=current_user.id,
         room_id=booking.room_id,
@@ -163,7 +182,7 @@ def read_my_bookings(
     """
     Get all booking requests for the current user.
     """
-    return db.query(BookingRequest).filter(BookingRequest.user_id == current_user.id).all()
+    return db.query(BookingRequest).filter(BookingRequest.user_id == current_user.id).order_by(desc(BookingRequest.id)).all()
 
 # --- Admin Endpoints ---
 
@@ -172,7 +191,7 @@ def read_all_bookings(db: Session = Depends(get_db)):
     """
     Admin: Get all booking requests.
     """
-    return db.query(BookingRequest).all()
+    return db.query(BookingRequest).order_by(desc(BookingRequest.id)).all()
 
 @router.put("/admin/requests/{booking_id}", response_model=BookingRequestSchema, dependencies=[Depends(get_admin_user)])
 def update_booking_status(
@@ -211,3 +230,53 @@ def update_booking_status(
     db.commit()
     db.refresh(db_booking)
     return db_booking
+
+@router.put("/admin/bulk-action", dependencies=[Depends(get_admin_user)])
+def bulk_booking_action(
+    action_data: BulkBookingAction,
+    db: Session = Depends(get_db)
+):
+    """
+    Admin: Bulk Approve or Reject booking requests.
+    If ids is provided, applies to those specific IDs.
+    If ids is None, applies to ALL PENDING requests.
+    Only affects PENDING requests.
+    """
+    if action_data.action not in [BookingStatus.APPROVED, BookingStatus.REJECTED]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    query = db.query(BookingRequest).filter(BookingRequest.status == BookingStatus.PENDING)
+    
+    if action_data.ids:
+        query = query.filter(BookingRequest.id.in_(action_data.ids))
+    
+    pending_requests = query.all()
+    count = 0
+    
+    for req in pending_requests:
+        if action_data.action == BookingStatus.APPROVED:
+            # Check for conflicts for each request
+            conflict = db.query(ClassSchedule).filter(
+                ClassSchedule.room_id == req.room_id,
+                ClassSchedule.day == req.day,
+                ClassSchedule.time_slot_id == req.time_slot_id
+            ).first()
+            
+            if conflict:
+                continue # Skip if conflict with class
+                
+            existing_booking = db.query(BookingRequest).filter(
+                BookingRequest.room_id == req.room_id,
+                BookingRequest.booking_date == req.booking_date,
+                BookingRequest.time_slot_id == req.time_slot_id,
+                BookingRequest.status == BookingStatus.APPROVED
+            ).first()
+            
+            if existing_booking:
+                continue # Skip if already booked
+        
+        req.status = action_data.action
+        count += 1
+        
+    db.commit()
+    return {"message": f"Successfully {action_data.action.lower()}ed {count} requests"}

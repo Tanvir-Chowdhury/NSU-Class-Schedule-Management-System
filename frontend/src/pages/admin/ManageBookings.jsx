@@ -66,25 +66,20 @@ const ManageBookings = () => {
     
     setStatus('');
     setLoading(true);
-    const pendingBookings = bookings.filter(b => b.status === 'PENDING');
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const booking of pendingBookings) {
-      try {
-        await axios.put(`http://localhost:8000/bookings/admin/requests/${booking.id}`, { status: action }, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        successCount++;
-      } catch (error) {
-        console.error(`Failed to ${action} booking ${booking.id}`, error);
-        failCount++;
-      }
-    }
     
-    fetchBookings();
-    setStatus(`${action} ${successCount} requests. ${failCount > 0 ? `Failed: ${failCount}` : ''}`);
-    setLoading(false);
+    try {
+      const response = await axios.put('http://localhost:8000/bookings/admin/bulk-action', 
+        { action: action }, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setStatus(response.data.message);
+      fetchBookings();
+    } catch (error) {
+      console.error(`Failed to ${action} bookings`, error);
+      setStatus(error.response?.data?.detail || 'Bulk action failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredBookings = bookings.filter(booking => {

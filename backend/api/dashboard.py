@@ -33,9 +33,11 @@ def get_teacher_stats(
     total_courses = db.query(func.count(func.distinct(Section.course_id)))\
         .filter(Section.teacher_id == teacher.id).scalar()
 
-    # 2. Office Hours (count)
-    office_hours_count = db.query(func.count(OfficeHour.id))\
-        .filter(OfficeHour.teacher_id == teacher.id).scalar()
+    # 2. Office Hours (list)
+    office_hours = db.query(OfficeHour).filter(OfficeHour.teacher_id == teacher.id).all()
+    office_hours_list = [
+        f"{oh.day}: {oh.start_time} - {oh.end_time}" for oh in office_hours
+    ]
 
     # 3. Pending Booking Requests
     pending_bookings = db.query(func.count(BookingRequest.id))\
@@ -48,7 +50,7 @@ def get_teacher_stats(
 
     return {
         "total_courses": total_courses or 0,
-        "office_hours_count": office_hours_count or 0,
+        "office_hours": office_hours_list,
         "pending_bookings": pending_bookings or 0,
         "total_credits": total_credits or 0
     }
