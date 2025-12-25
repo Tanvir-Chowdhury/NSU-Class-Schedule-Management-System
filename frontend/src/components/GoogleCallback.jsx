@@ -26,7 +26,25 @@ const GoogleCallback = () => {
         
         // Redirect after a short delay
         setTimeout(() => {
-          navigate('/calendar');
+          // Check user role to redirect to correct dashboard
+          const token = localStorage.getItem('token');
+          if (token) {
+            try {
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              const role = payload.role;
+              if (role === 'TEACHER') {
+                navigate('/teacher/schedule');
+              } else if (role === 'STUDENT') {
+                navigate('/student/schedule');
+              } else {
+                navigate('/');
+              }
+            } catch (e) {
+              navigate('/');
+            }
+          } else {
+            navigate('/login');
+          }
         }, 2000);
       } catch (error) {
         console.error('Google connect error:', error);

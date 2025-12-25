@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Dict, Any
+from datetime import datetime
 
 from core.database import get_db
 from core.security import get_current_active_user
@@ -33,11 +34,22 @@ def get_teacher_stats(
     total_courses = db.query(func.count(func.distinct(Section.course_id)))\
         .filter(Section.teacher_id == teacher.id).scalar()
 
-    # 2. Office Hours (list)
+    # 2. Office Hours (Total Duration)
     office_hours = db.query(OfficeHour).filter(OfficeHour.teacher_id == teacher.id).all()
-    office_hours_list = [
-        f"{oh.day}: {oh.start_time} - {oh.end_time}" for oh in office_hours
-    ]
+    total_minutes = 0
+    for oh in office_hours:
+        try:
+            # Parse "HH:MM AM/PM"
+            start = datetime.strptime(oh.start_time, "%I:%M %p")
+            end = datetime.strptime(oh.end_time, "%I:%M %p")
+            diff = end - start
+            total_minutes += diff.total_seconds() / 60
+        except Exception:
+            pass # Skip invalid formats
+            
+    total_hours = round(total_minutes / 60, 1)
+    # Format as "12h" or "12.5h"
+    office_hours_display = f"{int(total_hours)}h" if total_hours.is_integer() else f"{total_hours}h"
 
     # 3. Pending Booking Requests
     pending_bookings = db.query(func.count(BookingRequest.id))\
@@ -50,7 +62,7 @@ def get_teacher_stats(
 
     return {
         "total_courses": total_courses or 0,
-        "office_hours": office_hours_list,
+        "office_hours": office_hours_display,
         "pending_bookings": pending_bookings or 0,
         "total_credits": total_credits or 0
     }

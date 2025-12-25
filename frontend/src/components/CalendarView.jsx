@@ -49,6 +49,10 @@ const CustomToolbar = ({ date, onNavigate, onView, view }) => {
     onNavigate('TODAY');
   };
 
+  const label = view === 'day' 
+    ? format(date, 'MMMM d, yyyy') 
+    : format(date, 'MMMM yyyy');
+
   return (
     <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
       <div className="flex items-center gap-2">
@@ -73,7 +77,7 @@ const CustomToolbar = ({ date, onNavigate, onView, view }) => {
           </button>
         </div>
         <h2 className="text-xl font-bold text-slate-800 ml-2">
-          {format(date, 'MMMM yyyy')}
+          {label}
         </h2>
       </div>
 
@@ -120,13 +124,13 @@ const CustomEvent = ({ event }) => {
 const CustomWeekHeader = ({ date, label, localizer }) => {
   return (
     <div className="py-3 flex flex-col items-center justify-center">
-      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+      <div className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
         {format(date, 'EEE')}
       </div>
-      <div className={`text-xl font-bold h-8 w-8 flex items-center justify-center rounded-full ${
+      <div className={`text-2xl font-extrabold h-10 w-10 flex items-center justify-center rounded-full ${
         format(date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') 
           ? 'bg-indigo-600 text-white shadow-md' 
-          : 'text-slate-800'
+          : 'text-slate-900 hover:bg-slate-100'
       }`}>
         {format(date, 'd')}
       </div>

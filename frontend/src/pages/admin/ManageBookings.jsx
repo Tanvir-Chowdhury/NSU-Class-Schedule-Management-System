@@ -97,9 +97,25 @@ const ManageBookings = () => {
   return (
     <div className="max-w-6xl mx-auto p-8">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Manage Bookings</h1>
-          <p className="text-slate-500">Review and approve/reject room booking requests.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Manage Bookings</h1>
+            <p className="text-slate-500">Review and approve/reject room booking requests.</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleBulkAction('APPROVED')}
+              className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" /> Approve All Pending
+            </button>
+            <button
+              onClick={() => handleBulkAction('REJECTED')}
+              className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+            >
+              <XCircle className="h-4 w-4 mr-2" /> Reject All Pending
+            </button>
+          </div>
         </div>
 
         {status && (
@@ -122,20 +138,6 @@ const ManageBookings = () => {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 outline-none text-slate-600 placeholder:text-slate-400"
           />
-          <div className="flex gap-2 border-l pl-4 border-slate-200">
-            <button
-              onClick={() => handleBulkAction('APPROVED')}
-              className="inline-flex items-center px-4 py-2 bg-green-100 hover:bg-green-200 text-green-800 font-medium rounded-lg transition-colors shadow-sm border border-green-200"
-            >
-              <CheckCircle className="h-4 w-4 mr-2" /> Approve All Pending
-            </button>
-            <button
-              onClick={() => handleBulkAction('REJECTED')}
-              className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 font-medium rounded-lg transition-colors shadow-sm border border-red-200"
-            >
-              <XCircle className="h-4 w-4 mr-2" /> Reject All Pending
-            </button>
-          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

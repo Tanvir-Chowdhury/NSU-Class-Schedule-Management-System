@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from models.user import User
 from models.teacher import Teacher
 from models.schedule import ClassSchedule, Section
+from models.booking import BookingRequest, BookingStatus
 from models.academic import Course, DurationMode
 from core.constants import TIME_SLOTS
 
@@ -63,6 +64,7 @@ def sync_schedule(user: User, creds: Credentials, db: Session):
     # 1. Fetch Schedule Events
     events_to_sync = []
     
+    # A. Recurring Class Schedules (Teachers Only)
     if user.role == "TEACHER":
         teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
         if teacher:
@@ -98,6 +100,32 @@ def sync_schedule(user: User, creds: Credentials, db: Session):
     elif user.role == "STUDENT":
         # Placeholder for student sync logic
         pass
+
+    # B. One-time Room Bookings (All Users)
+    bookings = db.query(BookingRequest).filter(
+        BookingRequest.user_id == user.id,
+        BookingRequest.status == BookingStatus.APPROVED
+    ).all()
+
+    for booking in bookings:
+        # Map slot ID to time
+        # TIME_SLOTS is a dict like {1: "08:00 AM - 09:30 AM", ...}
+        slot_str = TIME_SLOTS.get(booking.time_slot_id)
+        if slot_str:
+            start_str, end_str = slot_str.split(' - ')
+            start_time = datetime.datetime.strptime(start_str, "%I:%M %p").time()
+            end_time = datetime.datetime.strptime(end_str, "%I:%M %p").time()
+            
+            start_dt = datetime.datetime.combine(booking.booking_date, start_time)
+            end_dt = datetime.datetime.combine(booking.booking_date, end_time)
+            
+            events_to_sync.append({
+                'summary': f"Room Booking: {booking.reason}",
+                'location': booking.room.room_number if booking.room else "TBA",
+                'description': f"Approved Booking",
+                'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
+                'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
+            })
 
     # 2. Insert Events
     created_count = 0

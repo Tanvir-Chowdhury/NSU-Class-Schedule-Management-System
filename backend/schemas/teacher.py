@@ -49,6 +49,7 @@ class TeacherBase(BaseModel):
     projects: Optional[str] = None
     contact_details: Optional[str] = None
     faculty_type: Optional[str] = None
+    department: Optional[str] = None
 
 class TeacherUpdate(BaseModel):
     initial: Optional[str] = None
@@ -59,6 +60,7 @@ class TeacherUpdate(BaseModel):
     projects: Optional[str] = None
     contact_details: Optional[str] = None
     faculty_type: Optional[str] = None
+    department: Optional[str] = None
     office_hours: Optional[List[OfficeHourCreate]] = None
     timing_preferences: Optional[List[TeacherTimingPreferenceCreate]] = None
 

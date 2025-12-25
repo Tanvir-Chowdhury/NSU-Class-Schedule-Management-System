@@ -16,7 +16,7 @@ const TeacherDashboard = () => {
   const { user, token } = useAuth();
   const [stats, setStats] = useState({
     total_courses: 0,
-    office_hours: [],
+    office_hours: "0h",
     pending_bookings: 0,
     total_credits: 0
   });
@@ -39,21 +39,7 @@ const TeacherDashboard = () => {
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-shadow">
       <div>
         <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-        <div className="text-slate-900">
-          {Array.isArray(value) ? (
-            value.length > 0 ? (
-              <ul className="text-sm space-y-1">
-                {value.map((item, idx) => (
-                  <li key={idx} className="font-medium">{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <span className="text-2xl font-bold">0</span>
-            )
-          ) : (
-            <h3 className="text-2xl font-bold">{value}</h3>
-          )}
-        </div>
+        <h3 className="text-2xl font-bold text-slate-900">{value}</h3>
       </div>
       <div className={`p-3 rounded-lg ${bgColor}`}>
         <Icon className={`h-6 w-6 ${color}`} />

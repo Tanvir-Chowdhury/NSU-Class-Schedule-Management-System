@@ -37,7 +37,9 @@ const ManageTeachers = () => {
   const [newTeacherData, setNewTeacherData] = useState({
     initial: '',
     name: '',
-    email: ''
+    email: '',
+    department: '',
+    faculty_type: 'Permanent'
   });
   const [selectedIds, setSelectedIds] = useState([]);
   
@@ -85,7 +87,7 @@ const ManageTeachers = () => {
       });
       setStatus({ type: 'success', message: 'Teacher created successfully.' });
       setIsModalOpen(false);
-      setNewTeacherData({ initial: '', name: '', email: '' });
+      setNewTeacherData({ initial: '', name: '', email: '', department: '', faculty_type: 'Permanent' });
       fetchTeachers();
     } catch (error) {
       setStatus({ type: 'error', message: error.response?.data?.detail || 'Failed to create teacher.' });
@@ -298,6 +300,8 @@ const ManageTeachers = () => {
                     )}
                   </div>
                 </th>
+                <th className="px-6 py-4">Department</th>
+                <th className="px-6 py-4">Faculty Type</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -358,6 +362,41 @@ const ManageTeachers = () => {
                         />
                       ) : (
                         teacher.name
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">
+                      {editingId === teacher.id ? (
+                        <input
+                          type="text"
+                          name="department"
+                          value={editFormData.department || ''}
+                          onChange={handleEditChange}
+                          className="w-full px-2 py-1 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        />
+                      ) : (
+                        teacher.department || '-'
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">
+                      {editingId === teacher.id ? (
+                        <select
+                          name="faculty_type"
+                          value={editFormData.faculty_type || 'Permanent'}
+                          onChange={handleEditChange}
+                          className="w-full px-2 py-1 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        >
+                          <option value="Permanent">Permanent</option>
+                          <option value="Contractual">Contractual</option>
+                          <option value="Visiting">Visiting</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          teacher.faculty_type === 'Permanent' ? 'bg-green-100 text-green-800' :
+                          teacher.faculty_type === 'Contractual' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {teacher.faculty_type || 'Permanent'}
+                        </span>
                       )}
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -481,6 +520,30 @@ const ManageTeachers = () => {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   placeholder="e.g. mahady@northsouth.edu"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+                <input
+                  type="text"
+                  value={newTeacherData.department}
+                  onChange={(e) => setNewTeacherData({...newTeacherData, department: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  placeholder="e.g. ECE"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Faculty Type</label>
+                <select
+                  value={newTeacherData.faculty_type}
+                  onChange={(e) => setNewTeacherData({...newTeacherData, faculty_type: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                >
+                  <option value="Permanent">Permanent</option>
+                  <option value="Contractual">Contractual</option>
+                  <option value="Visiting">Visiting</option>
+                </select>
               </div>
 
               <div className="pt-4 flex justify-end gap-3">

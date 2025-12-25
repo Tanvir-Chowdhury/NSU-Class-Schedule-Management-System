@@ -85,8 +85,8 @@ This project is a Class Schedule Management System designed to help manage and o
             - **Pagination:** Efficiently handles large datasets with server-side pagination.
             - **Search & Sort:** Server-side search by name/initial/email and stable sorting.
             - **CSV Upload:** Bulk upload teachers via CSV file.
-            - **Manual Creation:** Add single teachers manually.
-            - **Inline Editing:** Edit teacher details (Name, Email, Department, Max Load).
+            - **Manual Creation:** Add single teachers manually with Department and Faculty Type.
+            - **Inline Editing:** Edit teacher details (Name, Email, Department, Faculty Type).
             - **Delete:** Remove teachers from the system.
             - **Bulk Delete:** Select multiple teachers via checkboxes and delete them in one action.
     - **Manage Rooms (`src/pages/admin/ManageRooms.jsx`):**
@@ -105,7 +105,7 @@ This project is a Class Schedule Management System designed to help manage and o
             - **List View:** Displays all booking requests with status (Pending, Approved, Rejected).
             - **Search:** Filter requests by room number or reason.
             - **Actions:** Approve or Reject individual requests.
-            - **Bulk Actions:** "Approve All Pending" and "Reject All Pending" buttons for quick management.
+            - **Bulk Actions:** "Approve All Pending" and "Reject All Pending" buttons conveniently located in the header.
             - **Conflict Detection:** Backend prevents approving requests that conflict with existing bookings.
     - **Scheduler (`src/pages/admin/Scheduler.jsx`):**
         - **Auto-Schedule:** Button to trigger the backend auto-scheduling algorithm.
@@ -148,16 +148,17 @@ This project is a Class Schedule Management System designed to help manage and o
             - **Quick Actions:** Direct links to Book Room, My Schedule, and Preferences.
             - **Schedule Preview:** List of today's classes with student count and details.
         - **My Schedule (`src/pages/teacher/MySchedule.jsx`):**
-            - **Calendar View:** Interactive weekly calendar using `react-big-calendar`.
+            - **Calendar View:** Interactive weekly calendar using `react-big-calendar` with improved date visibility and Day view support.
             - **Events:** Displays assigned classes (recurring) and approved room bookings (one-time).
             - **Event Details:** Shows course code, title, room, and section.
             - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
                 - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration (14 weeks).
+                - **Room Bookings:** Approved one-time room bookings are also synced to the calendar.
                 - **Smart Mapping:** Automatically calculates the next occurrence of class days.
                 - **OAuth Integration:** Securely connects to Google via OAuth 2.0.
         - **Edit Profile (`src/pages/teacher/EditProfile.jsx`):**
-            - **Profile Management:** Update full name, Initial, Research Interests, Projects, and Contact Details.
-            - **Faculty Type:** Set status as **Permanent** or **Adjunct**.
+            - **Profile Management:** Update full name, Research Interests, Projects, and Contact Details.
+            - **Read-Only Fields:** Initial, Email, and Faculty Type are managed by Admins and cannot be edited by the teacher.
             - **Office Hours:** Manage weekly office hours.
         - **Preferences (`src/pages/teacher/Preferences.jsx`):**
             - **Course Selection:** Choose preferred courses and number of sections.

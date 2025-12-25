@@ -18,6 +18,7 @@ class Teacher(Base):
     projects = Column(String, nullable=True)
     contact_details = Column(String, nullable=True)
     faculty_type = Column(String, nullable=True) # 'Permanent' or 'Adjunct'
+    department = Column(String, nullable=True)
 
     user = relationship("User", back_populates="teacher_profile")
     office_hours = relationship("OfficeHour", back_populates="teacher", cascade="all, delete-orphan")

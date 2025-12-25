@@ -7,6 +7,7 @@ const TeacherEditProfile = () => {
   const [profileData, setProfileData] = useState({ 
     full_name: '', 
     initial: '',
+    email: '',
     profile_picture: '',
     published_papers: '',
     research_interests: '',
@@ -39,6 +40,7 @@ const TeacherEditProfile = () => {
       setProfileData({
         full_name: meRes.data.full_name || '',
         initial: teacherRes.data.initial || '',
+        email: meRes.data.email || '',
         profile_picture: meRes.data.profile_picture,
         published_papers: teacherRes.data.published_papers || '',
         research_interests: teacherRes.data.research_interests || '',
@@ -214,21 +216,27 @@ const TeacherEditProfile = () => {
                   <input
                     type="text"
                     value={profileData.initial}
-                    onChange={(e) => setProfileData({ ...profileData, initial: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    readOnly
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-500 cursor-not-allowed focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Email</label>
+                  <input
+                    type="email"
+                    value={profileData.email}
+                    readOnly
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-500 cursor-not-allowed focus:outline-none"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Faculty Type</label>
-                  <select
-                    value={profileData.faculty_type}
-                    onChange={(e) => setProfileData({ ...profileData, faculty_type: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all bg-white"
-                  >
-                    <option value="">Select Type</option>
-                    <option value="Permanent">Permanent</option>
-                    <option value="Adjunct">Adjunct</option>
-                  </select>
+                  <input
+                    type="text"
+                    value={profileData.faculty_type || 'Not Set'}
+                    readOnly
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-500 cursor-not-allowed focus:outline-none"
+                  />
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-sm font-medium text-slate-700">Contact Details</label>

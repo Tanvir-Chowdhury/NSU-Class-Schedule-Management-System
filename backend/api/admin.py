@@ -353,7 +353,9 @@ def create_teacher(teacher: TeacherCreate, background_tasks: BackgroundTasks, db
     new_teacher = Teacher(
         user_id=new_user.id,
         initial=teacher.initial,
-        name=teacher.name
+        name=teacher.name,
+        faculty_type=teacher.faculty_type,
+        department=teacher.department
     )
     db.add(new_teacher)
     db.commit()
@@ -417,6 +419,12 @@ def update_teacher(teacher_id: int, teacher_update: TeacherUpdate, background_ta
         
     if teacher_update.name:
         db_teacher.name = teacher_update.name
+    
+    if teacher_update.faculty_type:
+        db_teacher.faculty_type = teacher_update.faculty_type
+        
+    if teacher_update.department:
+        db_teacher.department = teacher_update.department
     
     db.commit()
     db.refresh(db_teacher)
