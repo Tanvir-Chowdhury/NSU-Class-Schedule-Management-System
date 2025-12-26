@@ -70,6 +70,7 @@ const ManageSchedules = () => {
     time_slot_id: 1,
     is_friday_booking: false
   });
+  const [currentSemester, setCurrentSemester] = useState('');
 
   // Auto-Scheduler & Calendar View State
   const [isRunning, setIsRunning] = useState(false);
@@ -100,6 +101,10 @@ const ManageSchedules = () => {
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    fetchCurrentSemester();
   }, []);
 
   useEffect(() => {
@@ -142,6 +147,19 @@ const ManageSchedules = () => {
       setRooms(res.data.items || []);
     } catch (error) {
       console.error("Failed to fetch rooms");
+    }
+  };
+
+  const fetchCurrentSemester = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/settings/current_semester', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.data && response.data.value) {
+        setCurrentSemester(response.data.value);
+      }
+    } catch (error) {
+      console.error('Failed to fetch semester', error);
     }
   };
 
@@ -271,15 +289,28 @@ const ManageSchedules = () => {
       });
       const allSchedules = response.data.items || [];
 
+      // Sort schedules: Course Code ASC, then Section Number ASC
+      allSchedules.sort((a, b) => {
+        const courseA = a.section.course.code.toUpperCase();
+        const courseB = b.section.course.code.toUpperCase();
+        
+        if (courseA < courseB) return -1;
+        if (courseA > courseB) return 1;
+        
+        // If courses are equal, sort by section
+        return a.section.section_number - b.section.section_number;
+      });
+
       const doc = new jsPDF();
-      doc.text("Class Schedules", 14, 10);
+      doc.setFontSize(18);
+      doc.text(`Class Schedules - ${currentSemester}`, 14, 15);
+      doc.setFontSize(11);
       
-      const tableColumn = ["ID", "Course", "Section", "Teacher", "Room", "Day", "Time"];
+      const tableColumn = ["Course", "Section", "Teacher", "Room", "Day", "Time"];
       const tableRows = [];
 
       allSchedules.forEach(schedule => {
         const scheduleData = [
-          schedule.id,
           schedule.section.course.code,
           schedule.section.section_number,
           schedule.section.teacher ? schedule.section.teacher.initial : 'TBA',
@@ -428,6 +459,50 @@ const ManageSchedules = () => {
       setPagination(prev => ({ ...prev, page: newPage }));
     }
   };
+
+  const getProcessedSchedules = () => {
+    const processed = [];
+    const skipIds = new Set();
+
+    schedules.forEach(schedule => {
+      if (skipIds.has(schedule.id)) return;
+
+      const isExtended = schedule.section?.course?.duration_mode === 'EXTENDED';
+      
+      if (isExtended) {
+        // Find the pair (next slot)
+        const pair = schedules.find(s => 
+          s.id !== schedule.id &&
+          s.section_id === schedule.section_id &&
+          s.day === schedule.day &&
+          s.time_slot_id === schedule.time_slot_id + 1
+        );
+
+        if (pair) {
+          // Merge
+          const startTime = TIME_SLOTS[schedule.time_slot_id]?.split(' - ')[0] || '';
+          const endTime = TIME_SLOTS[pair.time_slot_id]?.split(' - ')[1] || '';
+          
+          processed.push({
+            ...schedule,
+            isMerged: true,
+            mergedTime: `${startTime} - ${endTime}`,
+            mergedDuration: "3h 10m"
+          });
+          skipIds.add(pair.id);
+        } else {
+          // No pair found on this page, render as is
+          processed.push(schedule);
+        }
+      } else {
+        processed.push(schedule);
+      }
+    });
+
+    return processed;
+  };
+
+  const processedSchedules = getProcessedSchedules();
 
   return (
     <div className="space-y-6">
@@ -629,7 +704,9 @@ const ManageSchedules = () => {
           </table>
         </div>
       </div>
+      
 
+      <h2 className="text-xl font-bold text-slate-900 mb-4">Schedules</h2>
       <div className="flex items-center gap-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
         <Search className="h-5 w-5 text-slate-400" />
         <input
@@ -726,7 +803,7 @@ const ManageSchedules = () => {
                   </td>
                 </tr>
               ) : (
-                schedules.map((schedule, index) => (
+                processedSchedules.map((schedule, index) => (
                   <tr key={schedule.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <input
@@ -751,7 +828,11 @@ const ManageSchedules = () => {
                     <td className="px-6 py-4 text-slate-600">
                       <div className="flex flex-col">
                         <span className="font-medium text-slate-900">{schedule.day}</span>
-                        <span className="text-xs text-slate-500">{TIME_SLOTS[schedule.time_slot_id] || `Slot ${schedule.time_slot_id}`}</span>
+                        <span className="text-xs text-slate-500">
+                          {schedule.isMerged 
+                            ? schedule.mergedTime 
+                            : (TIME_SLOTS[schedule.time_slot_id] || `Slot ${schedule.time_slot_id}`)}
+                        </span>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-slate-600">
@@ -835,10 +916,12 @@ const ManageSchedules = () => {
                                   </span>
                               </td>
                               <td className="px-6 py-4 text-center">
-                                  {teacher.status === 'Unassigned' && (
-                                      <a href={`mailto:${teacher.contact_details || ''}`} className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" title="Contact Teacher">
+                                  {(teacher.email || teacher.contact_details) ? (
+                                      <a href={`mailto:${teacher.email || teacher.contact_details}`} className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" title={`Email ${teacher.email || teacher.contact_details}`}>
                                           <Mail className="h-4 w-4" />
                                       </a>
+                                  ) : (
+                                      <span className="text-slate-400">-</span>
                                   )}
                               </td>
                           </tr>

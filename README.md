@@ -22,26 +22,38 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
     - **Approval Workflow:** Teachers submit preferences which enter a "Pending" state. Admins can review, accept, or reject them individually or in bulk. Only accepted preferences are fed into the auto-scheduler.
 - **Resource Management:** Full CRUD capabilities for Rooms, Courses, and Teachers with bulk upload (CSV) and bulk delete options.
 - **Teacher Assignment Overview:** Real-time tracking of faculty assignments and workload.
+- **Notification System:**
+    - **Broadcast & Targeted Messaging:** Admins can send announcements to "All Users", "All Teachers", "All Students", or specific individuals.
+    - **User Search:** When targeting specific users, admins can search across both Student and Teacher databases by name, email, or ID.
+    - **History Log:** A complete history of sent notifications is maintained for administrative review.
+    - **Auto-Notifications:** The system automatically notifies teachers when the auto-scheduler assigns them new courses, providing a detailed list of their classes, rooms, and times.
 
 ### 3. AI-Powered Assistant (RAG)
 - **Context-Aware Chatbot:** A floating AI assistant available throughout the portal that answers queries about schedules, rules, and user data.
+- **Persistent Chat History:** Chat sessions are now saved to the database, allowing users to view their previous conversations with the AI assistant.
 - **Real-Time Synchronization:** Any change in the database (Create/Update/Delete) is instantly reflected in the Pinecone vector database.
 - **Optimized Data Structure:** All data is stored as structured JSON objects in the vector database, enabling the AI to parse and understand complex relationships (e.g., Teacher-Course-Room mappings) more effectively.
-- **Enhanced Teacher Profiles:** The vector database now indexes comprehensive teacher profiles, including email, faculty type, research interests, and published papers, allowing for rich queries like "Who specializes in AI?".
-- **Office Hours & Bookings:** The AI now has access to teacher office hours and room booking requests, enabling it to answer questions like "When is Professor X available?" or "What is the status of my room booking?".
-- **Performance Optimization:** Implemented bulk indexing strategies to handle large datasets efficiently, ensuring rapid system resets and updates.
-- **Asynchronous Processing:** Vectorization and database upserts are handled in background tasks, ensuring that the user interface remains responsive during heavy data operations.
+- **Rich Context Descriptions:** Every vector embedding (Rooms, Teachers, Courses, Schedules, Bookings) now includes a natural language `description` field. This ensures the AI understands the full context (e.g., "Office hours for Teacher X are on Monday...") and reduces "I don't know" responses.
+- **Enhanced Teacher Profiles:** The vector database indexes comprehensive teacher profiles, including email, faculty type, research interests, published papers, and office hours.
+- **Office Hours & Bookings:** The AI has access to teacher office hours and room booking requests, enabling it to answer questions like "When is Professor X available?" or "What is the status of my room booking?".
+- **Performance Optimization:** Implemented bulk indexing strategies to handle large datasets efficiently.
+- **Asynchronous Processing:** Vectorization and database upserts are handled in background tasks.
 - **Privacy Filters:** Automatically redacts sensitive information (like CGPA) based on the user's role.
 
 ### 4. Student & Teacher Portals
+- **Shared Features:**
+    - **Notification Center:** A dedicated page for viewing announcements.
+    - **Real-Time Alerts:** A blinking red badge on the sidebar indicates unseen notifications.
+    - **Read Status:** Users can mark notifications as read, updating the badge count instantly.
 - **Student Features:**
     - **Course Planner:** Interactive tool to plan semesters, check for conflicts, and manage course loads.
-    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing enrolled courses with time slots, room numbers, and day patterns.
+    - **My Schedule:** Personalized schedule view showing enrolled courses.
 - **Teacher Features:**
-    - **Dashboard:** Overview of assigned courses, total credits (calculated across all assigned sections), and office hours.
-    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing assigned classes.
+    - **Dashboard:** Overview of assigned courses, total credits, and office hours.
+    - **My Schedule:** Personalized schedule view showing assigned classes.
     - **Profile Management:** Manage research interests, office hours, and public profile details.
-    - **Faculty Types:** Support for Permanent (12 credits min) and Adjunct (3 credits min) faculty roles.
+    - **Contact Info:** "Mail" icons in schedule views allow quick email communication with students or admins.
+    - **Faculty Types:** Support for Permanent and Adjunct faculty roles.
 
 ### 5. Google Calendar Integration
 - **Seamless Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
@@ -122,13 +134,19 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - `role`: The user role ('admin', 'teacher', 'student') to determine the navigation links.
     - **Features:**
         - **Dynamic Navigation:** Renders different sidebar links based on the user's role.
+        - **Notification Badge:** A real-time blinking red badge on the "Notifications" link indicating unread messages.
         - **User Identity:** Displays the logged-in user's full name and role in the sidebar footer.
         - **Responsive Design:** Collapsible sidebar for mobile devices with a hamburger menu.
         - **Role-Based Links:**
             - **Admin:** Dashboard, Manage Teachers, Manage Courses, Scheduler, Manage Schedules, Manage Bookings, Settings.
-            - **Teacher:** Dashboard, My Schedule, Book Room, Preferences, Settings.
-            - **Student:** Dashboard, My Schedule, Course Planner, Book Room.
+            - **Teacher:** Dashboard, Notifications, My Schedule, Book Room, Preferences, Settings.
+            - **Student:** Dashboard, Notifications, My Schedule, Course Planner, Book Room.
 - **Shared Pages:**
+    - **Notifications (`src/pages/shared/Notifications.jsx`):**
+        - **Central Hub:** Displays a list of all notifications for the user.
+        - **Read Status:** Visual distinction between read (gray) and unread (white) notifications.
+        - **Actions:** Users can mark individual notifications as read or "Mark All as Read".
+        - **Empty State:** Friendly UI when there are no notifications.
     - **Book Room (`src/pages/shared/BookRoom.jsx`):**
         - **Availability Check:** Users can search for available rooms by date, time slot, and room type.
         - **Visual Status:** Rooms are color-coded (Green: Available, Yellow: Pending, Red: Occupied).
@@ -227,6 +245,14 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Availability:** Shows room capacity (e.g., "35 Seats").
         - **Sorting:** Global server-side sorting for all columns including Availability.
         - **Bulk Actions:** Delete multiple schedule entries at once.
+        - **Smart Display:** Automatically merges consecutive time slots for Extended Labs into a single row (e.g., "08:00 AM - 11:10 AM") for cleaner visualization.
+        - **Manual Scheduling:**
+            - **Conflict Detection:** Prevents double-booking of Rooms, Sections, and Teachers.
+            - **Extended Labs:** Automatically books two consecutive slots when scheduling an Extended Lab.
+        - **PDF Export:**
+            - **Custom Header:** Includes the current semester name (e.g., "Class Schedules - Fall 2025") fetched from system settings.
+            - **Optimized Sorting:** Schedules are automatically sorted by Course Code (ASC) and then Section Number (ASC) for better readability.
+            - **Clean Layout:** Excludes internal IDs and focuses on relevant details (Course, Section, Teacher, Room, Day, Time).
     - **Admin Management:**
         - **Create Admin:** Existing admins can create new admin accounts.
         - **Security:** Randomly generates secure passwords for new admins.
@@ -241,7 +267,10 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Schedule Preview:** List of today's classes with time, room, and type details.
     - **My Schedule (`src/pages/student/MySchedule.jsx`):**
         - **Calendar View:** Interactive weekly calendar displaying enrolled classes and approved bookings.
-        - **Integration:** Syncs with Google Calendar.
+        - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
+            - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration.
+            - **Pattern Support:** Correctly handles multi-day patterns (e.g., ST = Sunday & Tuesday) by creating recurring events on both days.
+            - **Room Bookings:** Approved one-time room bookings are also synced.
     - **Settings (`src/pages/student/Settings.jsx`):**
         - **Profile Management:** Update full name, NSU ID, CGPA, and Course History.
         - **Profile Picture:** Upload and update profile picture.
@@ -258,6 +287,7 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - **Event Details:** Shows course code, title, room, and section.
             - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
                 - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration (14 weeks).
+                - **Pattern Support:** Correctly handles multi-day patterns (e.g., ST = Sunday & Tuesday) by creating recurring events on both days.
                 - **Room Bookings:** Approved one-time room bookings are also synced to the calendar.
                 - **Smart Mapping:** Automatically calculates the next occurrence of class days.
                 - **OAuth Integration:** Securely connects to Google via OAuth 2.0.
@@ -347,9 +377,9 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Automatic Updates:** Any creation, update, or deletion of Rooms, Courses, Teachers, or Schedules in the database triggers an immediate background update to the Vector Database.
         - **Auto-Scheduler Integration:** Running the auto-scheduler automatically indexes hundreds of new class schedules with detailed time and location info.
         - **Data Coverage:**
-            - **Rooms:** Capacity, Type (Lab/Theory).
-            - **Courses:** Code, Title, Credits, Type.
-            - **Teachers:** Name, Initial, Email.
+            - **Rooms:** Capacity, Type (Lab/Theory), Description.
+            - **Courses:** Code, Title, Credits, Type, Description.
+            - **Teachers:** Name, Initial, Email, Office Hours, Research Interests, Description.
             - **Schedules:** Exact time, day, room, and teacher for every section.
     - **Functionality:**
         - Answers queries about university rules, schedules, and user profiles.
@@ -365,7 +395,15 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - Fetches all available sections from the database.
             - Feeds the user's constraints (e.g., "I want ST classes") and the section list to Mistral.
             - Mistral generates a conflict-free schedule suggestion.
-- *Pending implementation*
+- **Notification System:**
+    - **Architecture:** Polling-based architecture (30s interval) to ensure real-time delivery without WebSocket complexity.
+    - **Targeting:** Supports broadcasting to all users, specific roles (Teachers/Students), or individual users.
+    - **Triggers:**
+        - **Manual:** Admins can send custom announcements.
+        - **Automated:** The Auto-Scheduler triggers notifications to teachers upon schedule generation.
+    - **User Experience:**
+        - **Visual Cues:** Blinking red badge on the sidebar.
+        - **Management:** Dedicated page to view and mark notifications as read.
 
 ## Project Structure
 ```
@@ -502,6 +540,14 @@ MISTRAL_API_KEY=your_mistral_api_key
         - `GET /bookings/my-requests`: View own booking requests.
         - `GET /bookings/admin/requests`: Admin view of all requests.
         - `PUT /bookings/admin/requests/{id}`: Admin Approve/Reject requests.
+    - **Notifications:**
+        - `GET /notifications`: Get all notifications for the current user.
+        - `GET /notifications/unread-count`: Get the count of unread notifications.
+        - `PUT /notifications/{id}/read`: Mark a specific notification as read.
+        - `PUT /notifications/read-all`: Mark all notifications as read.
+        - `POST /admin/notifications/broadcast`: Send a notification to all users or specific roles.
+        - `POST /admin/notifications/send`: Send a notification to specific users.
+        - `GET /admin/users/search`: Search for users (Teachers/Students) to target notifications.
     - **Google Calendar Integration:**
         - `GET /google/login`: Redirects to Google OAuth2 login.
         - `POST /google/connect`: Connects account using the auth code.
@@ -518,7 +564,7 @@ MISTRAL_API_KEY=your_mistral_api_key
         - **RAG Pipeline:**
             - **Trigger:** Updates are triggered automatically on CRUD operations.
             - **Execution:** Runs asynchronously as a FastAPI Background Task to prevent blocking.
-            - **Data Format:** Converts entity objects (Rooms, Teachers, etc.) into structured JSON strings before embedding.
+            - **Data Format:** Converts entity objects (Rooms, Teachers, etc.) into structured JSON strings with rich natural language descriptions before embedding.
             - **Process:** Generates embeddings using Mistral and upserts to Pinecone with rich metadata.
     - **AI Chat:**
         - `POST /chat/message`: Send a message to the AI Assistant.

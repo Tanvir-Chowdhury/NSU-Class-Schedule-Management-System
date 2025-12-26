@@ -17,7 +17,8 @@ import {
   ArrowDown,
   ChevronLeft,
   ChevronRight,
-  Download
+  Download,
+  Mail
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -73,7 +74,7 @@ const ManageTeachers = () => {
           teacher.name,
           teacher.department || 'N/A',
           teacher.faculty_type || 'N/A',
-          teacher.contact_details || 'N/A'
+          teacher.email || teacher.contact_details || 'N/A'
         ];
         tableRows.push(teacherData);
       });
@@ -101,7 +102,7 @@ const ManageTeachers = () => {
 
       const headers = ["Initial,Name,Department,Faculty Type,Contact"];
       const rows = allTeachers.map(teacher => 
-        `${teacher.initial},"${teacher.name}",${teacher.department || ''},${teacher.faculty_type || ''},"${teacher.contact_details || ''}"`
+        `${teacher.initial},"${teacher.name}",${teacher.department || ''},${teacher.faculty_type || ''},"${teacher.email || teacher.contact_details || ''}"`
       );
 
       const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
@@ -404,6 +405,7 @@ const ManageTeachers = () => {
                     )}
                   </div>
                 </th>
+                <th className="px-6 py-4 text-center">Contact</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -497,6 +499,19 @@ const ManageTeachers = () => {
                         }`}>
                           {teacher.faculty_type || 'Permanent'}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      {(teacher.email || teacher.contact_details) ? (
+                        <a 
+                          href={`mailto:${teacher.email || teacher.contact_details}`} 
+                          className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" 
+                          title={`Email ${teacher.email || teacher.contact_details}`}
+                        >
+                          <Mail className="h-4 w-4" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">-</span>
                       )}
                     </td>
                     <td className="px-6 py-4 text-right">

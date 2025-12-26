@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc
 from typing import List, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
+import json
 
 from core.database import get_db
 from core.security import get_current_active_user, get_admin_user
@@ -13,6 +14,7 @@ from models.schedule import ClassSchedule
 from models.academic import Room, ClassType
 from models.user import User
 from schemas.booking import BookingRequestCreate, BookingRequest as BookingRequestSchema, BookingRequestUpdate
+from services.rag_service import trigger_rag_update, trigger_rag_delete
 
 class BulkBookingAction(BaseModel):
     action: str
@@ -110,6 +112,7 @@ def check_availability(
 @router.post("/request", response_model=BookingRequestSchema)
 def create_booking_request(
     booking: BookingRequestCreate, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ):
@@ -173,11 +176,32 @@ def create_booking_request(
     db.add(new_booking)
     db.commit()
     db.refresh(new_booking)
+
+    # RAG Update
+    room = db.query(Room).filter(Room.id == new_booking.room_id).first()
+    room_number = room.room_number if room else "Unknown Room"
+    
+    description = f"Booking request for Room {room_number} by {current_user.email} on {new_booking.booking_date} ({new_booking.day}) at Time Slot {new_booking.time_slot_id}. Status: {new_booking.status}. Reason: {new_booking.reason}."
+    
+    rag_data = {
+        "type": "booking_request",
+        "room": room_number,
+        "user": current_user.email,
+        "date": str(new_booking.booking_date),
+        "day": new_booking.day,
+        "time_slot": new_booking.time_slot_id,
+        "status": new_booking.status,
+        "reason": new_booking.reason,
+        "description": description
+    }
+    trigger_rag_update(background_tasks, f"booking_{new_booking.id}", json.dumps(rag_data), {"type": "booking_request", "status": new_booking.status})
+
     return new_booking
 
 @router.delete("/request/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking_request(
     booking_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -209,6 +233,10 @@ def delete_booking_request(
 
     db.delete(booking)
     db.commit()
+
+    # RAG Delete
+    trigger_rag_delete(background_tasks, f"booking_{booking_id}")
+
     return None
 
 @router.get("/my-requests", response_model=List[BookingRequestSchema])
@@ -238,6 +266,7 @@ def read_all_bookings(db: Session = Depends(get_db)):
 def update_booking_status(
     booking_id: int, 
     booking_update: BookingRequestUpdate, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -270,11 +299,34 @@ def update_booking_status(
     db_booking.status = booking_update.status
     db.commit()
     db.refresh(db_booking)
+
+    # RAG Update
+    room = db.query(Room).filter(Room.id == db_booking.room_id).first()
+    room_number = room.room_number if room else "Unknown Room"
+    user = db.query(User).filter(User.id == db_booking.user_id).first()
+    user_email = user.email if user else "Unknown User"
+    
+    description = f"Booking request for Room {room_number} by {user_email} on {db_booking.booking_date} ({db_booking.day}) at Time Slot {db_booking.time_slot_id}. Status: {db_booking.status}. Reason: {db_booking.reason}."
+    
+    rag_data = {
+        "type": "booking_request",
+        "room": room_number,
+        "user": user_email,
+        "date": str(db_booking.booking_date),
+        "day": db_booking.day,
+        "time_slot": db_booking.time_slot_id,
+        "status": db_booking.status,
+        "reason": db_booking.reason,
+        "description": description
+    }
+    trigger_rag_update(background_tasks, f"booking_{db_booking.id}", json.dumps(rag_data), {"type": "booking_request", "status": db_booking.status})
+
     return db_booking
 
 @router.put("/admin/bulk-action", dependencies=[Depends(get_admin_user)])
 def bulk_booking_action(
     action_data: BulkBookingAction,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -294,6 +346,8 @@ def bulk_booking_action(
     pending_requests = query.all()
     count = 0
     
+    updated_requests = []
+
     for req in pending_requests:
         if action_data.action == BookingStatus.APPROVED:
             # Check for conflicts for each request
@@ -317,7 +371,32 @@ def bulk_booking_action(
                 continue # Skip if already booked
         
         req.status = action_data.action
+        updated_requests.append(req)
         count += 1
         
     db.commit()
+
+    # RAG Update for all updated requests
+    for req in updated_requests:
+        db.refresh(req)
+        room = db.query(Room).filter(Room.id == req.room_id).first()
+        room_number = room.room_number if room else "Unknown Room"
+        user = db.query(User).filter(User.id == req.user_id).first()
+        user_email = user.email if user else "Unknown User"
+        
+        description = f"Booking request for Room {room_number} by {user_email} on {req.booking_date} ({req.day}) at Time Slot {req.time_slot_id}. Status: {req.status}. Reason: {req.reason}."
+        
+        rag_data = {
+            "type": "booking_request",
+            "room": room_number,
+            "user": user_email,
+            "date": str(req.booking_date),
+            "day": req.day,
+            "time_slot": req.time_slot_id,
+            "status": req.status,
+            "reason": req.reason,
+            "description": description
+        }
+        trigger_rag_update(background_tasks, f"booking_{req.id}", json.dumps(rag_data), {"type": "booking_request", "status": req.status})
+
     return {"message": f"Successfully {action_data.action.lower()}ed {count} requests"}

@@ -30,6 +30,7 @@ class User(Base):
     teacher_profile = relationship("Teacher", back_populates="user", uselist=False)
     student_profile = relationship("Student", back_populates="user", uselist=False)
     admin_profile = relationship("Admin", back_populates="user", uselist=False)
+    chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', role='{self.role}')>"

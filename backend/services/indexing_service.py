@@ -36,6 +36,23 @@ def index_all_data(db: Session):
     # Index Teachers
     teachers = db.query(Teacher).all()
     for teacher in teachers:
+        # Process Office Hours
+        office_hours_list = []
+        office_hours_text = []
+        for oh in teacher.office_hours:
+            oh_str = f"{oh.day} {oh.start_time} - {oh.end_time}"
+            if oh.course:
+                oh_str += f" (for {oh.course.code})"
+            office_hours_list.append({
+                "day": oh.day,
+                "start_time": oh.start_time,
+                "end_time": oh.end_time,
+                "course": oh.course.code if oh.course else "General"
+            })
+            office_hours_text.append(oh_str)
+        
+        office_hours_description = "; ".join(office_hours_text) if office_hours_text else "No office hours listed."
+
         data = {
             "type": "teacher",
             "name": teacher.name,
@@ -48,7 +65,8 @@ def index_all_data(db: Session):
             "projects": teacher.projects,
             "contact_details": teacher.contact_details,
             "profile_picture": teacher.profile_picture,
-            "description": f"Teacher {teacher.name} ({teacher.initial}) is a {teacher.faculty_type} faculty from the {teacher.department} department. Email: {teacher.user.email if teacher.user else 'N/A'}. Research interests: {teacher.research_interests}. Contact: {teacher.contact_details}."
+            "office_hours": office_hours_list,
+            "description": f"Teacher {teacher.name} ({teacher.initial}) is a {teacher.faculty_type} faculty from the {teacher.department} department. Email: {teacher.user.email if teacher.user else 'N/A'}. Research interests: {teacher.research_interests}. Contact: {teacher.contact_details}. Office Hours: {office_hours_description}."
         }
         items_to_index.append({
             "vector_id": f"teacher_{teacher.id}",

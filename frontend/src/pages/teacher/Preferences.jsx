@@ -167,7 +167,7 @@ const TeacherPreferences = () => {
   // If loading failed or teacher data is missing, show error instead of "Profile Incomplete"
   if (!teacher) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="space-y-8 pb-12">
         <div className="bg-red-50 border border-red-200 rounded-2xl p-8 text-center">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Error Loading Profile</h2>
@@ -210,7 +210,7 @@ const TeacherPreferences = () => {
   const isCreditValid = totalCredits >= minCredits;
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-8">
+    <div className="space-y-8 pb-12">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-slate-900">Course Preferences</h1>

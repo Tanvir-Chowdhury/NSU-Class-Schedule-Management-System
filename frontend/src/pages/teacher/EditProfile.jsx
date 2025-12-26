@@ -130,19 +130,14 @@ const TeacherEditProfile = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12">
-      {/* Header Banner */}
-      <div className="relative bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-8 text-white overflow-hidden shadow-lg">
-        <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
-        <div className="absolute bottom-0 left-0 -mb-10 -ml-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
-        <div className="relative z-10">
-          <h1 className="text-3xl font-bold">Edit Profile</h1>
-          <p className="text-emerald-100 mt-2 max-w-xl">
-            Update your academic profile, research interests, and office hours.
-            This information will be publicly visible to students and visitors.
-          </p>
-        </div>
+    <div className="space-y-8 pb-12">
+
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Edit Profile</h1>
+        <p className="text-slate-500 mt-1">Update your academic profile, research interests, and office hours.This information will be publicly visible to students and visitors.</p>
       </div>
+
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column - Profile Card */}

@@ -30,6 +30,30 @@ const ChatWidget = () => {
     scrollToBottom();
   }, [messages, isOpen]);
 
+  useEffect(() => {
+    if (isOpen && token) {
+      const fetchHistory = async () => {
+        try {
+          const response = await axios.get('http://localhost:8000/chat/history', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (response.data.length > 0) {
+            const history = response.data.map((msg, index) => ({
+              id: `hist-${index}`,
+              text: msg.content,
+              sender: msg.role === 'user' ? 'user' : 'bot'
+            }));
+            setMessages(history);
+          }
+        } catch (error) {
+          console.error("Failed to fetch chat history:", error);
+        }
+      };
+      fetchHistory();
+    }
+  }, [isOpen, token]);
+
   const handleSendMessage = async (text) => {
     const messageText = text || inputText;
     if (!messageText.trim()) return;

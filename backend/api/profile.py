@@ -17,7 +17,7 @@ from models.schedule import Section, ClassSchedule
 from schemas.student import StudentUpdate, Student as StudentSchema
 from schemas.teacher import TeacherUpdate, Teacher as TeacherSchema, TeacherPreferenceCreate, TeacherPreference as TeacherPreferenceSchema
 from schemas.user import UserUpdate, PasswordChange, User as UserSchema, UserProfile
-from services.rag_service import trigger_rag_update
+from services.rag_service import trigger_rag_update, trigger_rag_delete
 from core.constants import TIME_SLOTS
 
 router = APIRouter(
@@ -214,9 +214,16 @@ def update_teacher_profile(
     if profile_update.faculty_type is not None:
         teacher.faculty_type = profile_update.faculty_type
     
+    new_office_hours_to_index = []
+
     if profile_update.office_hours is not None:
+        # Fetch existing office hours to delete their vectors
+        existing_ohs = db.query(OfficeHour).filter(OfficeHour.teacher_id == teacher.id).all()
+        for oh in existing_ohs:
+            trigger_rag_delete(background_tasks, f"office_hour_{oh.id}")
+
         # Clear existing office hours
-        db.query(OfficeHour).filter(OfficeHour.teacher_id == teacher.id).delete()
+        db.query(OfficeHour).filter(OfficeHour.teacher_id == teacher.id).delete(synchronize_session=False)
         
         # Add new office hours
         for oh_data in profile_update.office_hours:
@@ -228,10 +235,11 @@ def update_teacher_profile(
                 course_id=oh_data.course_id
             )
             db.add(new_oh)
+            new_office_hours_to_index.append(new_oh)
 
     if profile_update.timing_preferences is not None:
         # Clear existing timing preferences
-        db.query(TeacherTimingPreference).filter(TeacherTimingPreference.teacher_id == teacher.id).delete()
+        db.query(TeacherTimingPreference).filter(TeacherTimingPreference.teacher_id == teacher.id).delete(synchronize_session=False)
         
         # Add new timing preferences
         for tp_data in profile_update.timing_preferences:
@@ -257,10 +265,30 @@ def update_teacher_profile(
     db.commit()
     db.refresh(teacher)
     
-    # Trigger RAG Update
+    # Index new office hours
+    for oh in new_office_hours_to_index:
+        db.refresh(oh)
+        course_code = oh.course.code if oh.course else "General"
+        description = f"Office hours for {teacher.name} ({teacher.initial}) are on {oh.day} from {oh.start_time} to {oh.end_time}."
+        if oh.course:
+            description += f" for course {course_code}."
+            
+        data = {
+            "type": "office_hour",
+            "teacher": teacher.name,
+            "initial": teacher.initial,
+            "day": oh.day,
+            "start_time": oh.start_time,
+            "end_time": oh.end_time,
+            "course": course_code,
+            "description": description
+        }
+        trigger_rag_update(background_tasks, f"office_hour_{oh.id}", json.dumps(data), {"type": "office_hour", "teacher": teacher.initial})
+
+    # Trigger RAG Update for Teacher Profile
     data = construct_teacher_data(current_user, teacher, db)
-    vector_id = f"{UserRole.TEACHER}_{current_user.id}"
-    trigger_rag_update(background_tasks, vector_id, json.dumps(data), {"user_id": current_user.id, "role": UserRole.TEACHER})
+    vector_id = f"teacher_{teacher.id}"
+    trigger_rag_update(background_tasks, vector_id, json.dumps(data), {"type": "teacher", "initial": teacher.initial, "name": teacher.name})
     
     return teacher
 

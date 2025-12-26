@@ -46,22 +46,35 @@ def get_credentials_from_code(code: str):
 def get_next_day_date(day_name: str):
     """
     Returns the date of the next occurrence of the given day name.
+    Handles single days ('Monday') and patterns ('ST', 'MW', 'RA').
     """
-    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    today = datetime.date.today()
-    try:
-        target_day_index = days.index(day_name)
-    except ValueError:
-        # Fallback for invalid day names
-        return today
-
-    current_day_index = today.weekday()
+    days_map = {
+        'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6
+    }
     
-    days_ahead = target_day_index - current_day_index
-    if days_ahead < 0: # Target day has passed this week
-        days_ahead += 7
-        
-    return today + datetime.timedelta(days=days_ahead)
+    target_days = []
+    if day_name in days_map:
+        target_days.append(days_map[day_name])
+    elif day_name == 'ST':
+        target_days = [6, 1] # Sunday, Tuesday
+    elif day_name == 'MW':
+        target_days = [0, 2] # Monday, Wednesday
+    elif day_name == 'RA':
+        target_days = [3, 5] # Thursday, Saturday
+    else:
+        return datetime.date.today()
+
+    today = datetime.date.today()
+    current_day_index = today.weekday() # Mon=0, Sun=6
+    
+    candidates = []
+    for target_day_index in target_days:
+        days_ahead = target_day_index - current_day_index
+        if days_ahead < 0: # Target day has passed this week
+            days_ahead += 7
+        candidates.append(today + datetime.timedelta(days=days_ahead))
+    
+    return min(candidates) if candidates else today
 
 def get_time_from_slot(slot_id: int):
     slot_str = TIME_SLOTS.get(slot_id)
@@ -93,7 +106,8 @@ def sync_schedule(user: User, creds: Credentials, db: Session):
             # Map day name to RRULE BYDAY
             day_map = {
                 'Monday': 'MO', 'Tuesday': 'TU', 'Wednesday': 'WE', 
-                'Thursday': 'TH', 'Friday': 'FR', 'Saturday': 'SA', 'Sunday': 'SU'
+                'Thursday': 'TH', 'Friday': 'FR', 'Saturday': 'SA', 'Sunday': 'SU',
+                'ST': 'SU,TU', 'MW': 'MO,WE', 'RA': 'TH,SA'
             }
             byday = day_map.get(sch.day, 'MO')
 
@@ -103,7 +117,7 @@ def sync_schedule(user: User, creds: Credentials, db: Session):
                 'description': f"Section: {sch.section.section_number}",
                 'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
                 'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
-                'recurrence': [f'RRULE:FREQ=WEEKLY;COUNT=14;BYDAY={byday}']
+                'recurrence': [f'RRULE:FREQ=WEEKLY;COUNT=28;BYDAY={byday}'] # 14 weeks * 2 days/week approx
             })
 
     # A. Recurring Class Schedules
