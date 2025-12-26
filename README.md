@@ -3,6 +3,30 @@
 ## Project Overview
 This project is a Class Schedule Management System designed to help manage and organize academic schedules. It leverages a modern tech stack including AI capabilities for enhanced functionality.
 
+## Latest Updates (Dec 27, 2025)
+- **Student Features:**
+    - **Course Planner:** Students can now **drop/remove** courses from their planner directly via the UI.
+- **AI & Chatbot Enhancements:**
+    - **Rich Text Support:** The Chatbot now renders **Markdown tables, lists, and formatted text** for better readability.
+    - **RAG Expansion:** Implemented a **bulk indexing service** to feed all Rooms, Teachers, Courses, and Schedules into the Pinecone vector database for smarter AI responses.
+    - **Admin Control:** Added a "Reindex RAG" endpoint for Admins to manually trigger a knowledge base update.
+- **Bug Fixes:**
+    - **Admin Deletion:** Fixed an `IntegrityError` when deleting Admin accounts by ensuring the profile is deleted before the user record.
+
+## Latest Updates (Dec 26, 2025)
+- **Auto Scheduler Enhancements:**
+    - **Teacher Preferences:** The scheduler now prioritizes teacher timing preferences. If a teacher prefers a specific time slot, the system attempts to assign their sections to that slot first.
+    - **Fallback Logic:** If preferred slots are unavailable, the system falls back to random assignment.
+    - **Teacher Assignment:** Teachers are assigned to sections based on their course preferences *before* room scheduling begins.
+- **Database Updates:**
+    - **Dummy Data Script:** Added `backend/add_dummy_data.py` to populate the database with random faculty types (Permanent/Adjunct) and course preferences for testing.
+    - **Faculty Types:** Restricted to 'Permanent' and 'Adjunct' only.
+- **UI Improvements:**
+    - **Calendar View:** Added date headers to the Day view for better clarity.
+    - **Chat Widget:** Implemented a floating AI Chat Assistant (`src/components/ChatWidget.jsx`) available on all portal pages. It supports quick actions like "Plan my courses" and "Find empty labs".
+    - **Booking Management:** Users can now delete their own booking requests (if the time hasn't passed).
+    - **Admin Schedules:** Added a "Teacher Assignment Overview" table to track assigned vs. unassigned faculty.
+
 ## Tech Stack
 - **Backend:** FastAPI (Python)
 - **Database:** PostgreSQL
@@ -12,6 +36,11 @@ This project is a Class Schedule Management System designed to help manage and o
 
 ## Frontend Architecture
 ### Components
+- **Chat Widget (`src/components/ChatWidget.jsx`):**
+    - **Floating AI Assistant:** A collapsible chat window accessible from the bottom-right corner.
+    - **Context Aware:** Only visible to logged-in users.
+    - **Rich Formatting:** Uses `react-markdown` and `remark-gfm` to render tables, lists, and bold text.
+    - **Features:** Quick chips for common queries, typing indicators, and integration with the RAG-powered backend.
 - **Navbar (`src/components/Navbar.jsx`):**
     - **Dynamic Authentication State:**
         - **Logged Out:** Shows "Login" and "Register" buttons.
@@ -66,6 +95,7 @@ This project is a Class Schedule Management System designed to help manage and o
         - **Security:** Change password.
         - **Read-Only Email:** Email field is locked to prevent unauthorized changes.
         - **Admin Creation:** Allows existing admins to create new admin accounts.
+        - **RAG Management:** Trigger a full re-index of the vector database.
         - Displays success/error messages.
     - **Manage Courses (`src/pages/admin/ManageCourses.jsx`):**
         - Lists all courses with server-side pagination, search, and sorting.

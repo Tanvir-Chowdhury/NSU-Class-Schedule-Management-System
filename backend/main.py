@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from api import auth, admin, booking, calendar, profile, chat, settings, academic, admin_preferences, dashboard
+from api import auth, admin, booking, calendar, profile, chat, settings, academic, admin_preferences, dashboard, student
 from core.database import engine, Base, SessionLocal
 # Import all models to ensure relationships are registered
 from models.user import User, UserRole
@@ -78,6 +78,7 @@ app.include_router(settings.router)
 app.include_router(academic.router)
 app.include_router(admin_preferences.router)
 app.include_router(dashboard.router)
+app.include_router(student.router)
 
 @app.get("/")
 def read_root():

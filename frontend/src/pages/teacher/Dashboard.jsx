@@ -20,6 +20,7 @@ const TeacherDashboard = () => {
     pending_bookings: 0,
     total_credits: 0
   });
+  const [todaySchedule, setTodaySchedule] = useState([]);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -32,7 +33,20 @@ const TeacherDashboard = () => {
         console.error("Failed to fetch dashboard stats", error);
       }
     };
+
+    const fetchSchedule = async () => {
+      try {
+        const res = await axios.get('http://localhost:8000/dashboard/teacher/today', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTodaySchedule(res.data);
+      } catch (error) {
+        console.error("Failed to fetch today's schedule", error);
+      }
+    };
+
     fetchStats();
+    fetchSchedule();
   }, [token]);
 
   const StatCard = ({ title, value, icon: Icon, color, bgColor }) => (
@@ -138,27 +152,30 @@ const TeacherDashboard = () => {
           <span className="text-sm text-slate-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
         </div>
         <div className="divide-y divide-slate-100">
-          {[
-            { time: '09:40 AM - 11:10 AM', code: 'CSE327', title: 'Software Engineering', room: 'NAC514', type: 'Lecture', students: 35 },
-            { time: '02:40 PM - 04:10 PM', code: 'CSE299', title: 'Junior Design', room: 'NAC601', type: 'Lab', students: 28 },
-          ].map((cls, idx) => (
-            <div key={idx} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg font-semibold text-sm whitespace-nowrap">
-                  {cls.time}
+          {todaySchedule.length > 0 ? (
+            todaySchedule.map((cls, idx) => (
+              <div key={idx} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg font-semibold text-sm whitespace-nowrap">
+                    {cls.time}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900">{cls.code} - {cls.title}</h4>
+                    <p className="text-sm text-slate-500">{cls.type} • {cls.room} • {cls.students || 0} Students</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-semibold text-slate-900">{cls.code} - {cls.title}</h4>
-                  <p className="text-sm text-slate-500">{cls.type} • {cls.room} • {cls.students} Students</p>
+                <div className="hidden sm:block">
+                  <button className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
+                    View Details
+                  </button>
                 </div>
               </div>
-              <div className="hidden sm:block">
-                <button className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-                  View Details
-                </button>
-              </div>
+            ))
+          ) : (
+            <div className="p-8 text-center text-slate-500">
+              No classes scheduled for today.
             </div>
-          ))}
+          )}
         </div>
         <div className="p-4 bg-slate-50 border-t border-slate-200 text-center">
           <Link to="/teacher/schedule" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">

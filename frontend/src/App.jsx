@@ -22,15 +22,18 @@ import PublicTeacherProfile from './pages/public/TeacherProfile';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentSettings from './pages/student/Settings';
 import StudentSchedule from './pages/student/MySchedule';
+import CoursePlanner from './pages/student/CoursePlanner';
 import BookRoom from './pages/shared/BookRoom';
 import GoogleCallback from './components/GoogleCallback';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import ChatWidget from './components/ChatWidget';
 
 function App() {
   return (
     <AuthProvider>
       <Router>
+        <ChatWidget />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
@@ -196,6 +199,14 @@ function App() {
             <ProtectedRoute roles={['STUDENT']}>
               <Layout role="student">
                 <StudentSchedule />
+              </Layout>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/student/planner" element={
+            <ProtectedRoute roles={['STUDENT']}>
+              <Layout role="student">
+                <CoursePlanner />
               </Layout>
             </ProtectedRoute>
           } />

@@ -124,7 +124,7 @@ const CustomEvent = ({ event }) => {
 const CustomWeekHeader = ({ date, label, localizer }) => {
   return (
     <div className="py-3 flex flex-col items-center justify-center">
-      <div className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
+      <div className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-1">
         {format(date, 'EEE')}
       </div>
       <div className={`text-2xl font-extrabold h-10 w-10 flex items-center justify-center rounded-full ${
@@ -133,6 +133,26 @@ const CustomWeekHeader = ({ date, label, localizer }) => {
           : 'text-slate-900 hover:bg-slate-100'
       }`}>
         {format(date, 'd')}
+      </div>
+    </div>
+  );
+};
+
+// Custom Month Header Component (Just Weekday Name)
+const CustomMonthHeader = ({ date, label, localizer }) => {
+  return (
+    <div className="py-2 text-sm font-semibold text-slate-600 uppercase tracking-wider text-center">
+      {format(date, 'EEE')}
+    </div>
+  );
+};
+
+// Custom Day Header Component
+const CustomDayHeader = ({ date, label, localizer }) => {
+  return (
+    <div className="py-2 text-center">
+      <div className="text-lg font-bold text-slate-900">
+        {format(date, 'EEEE, MMMM d, yyyy')}
       </div>
     </div>
   );
@@ -298,7 +318,15 @@ const CalendarView = () => {
           components={{
             toolbar: CustomToolbar,
             event: CustomEvent,
-            header: CustomWeekHeader
+            week: {
+              header: CustomWeekHeader
+            },
+            day: {
+              header: CustomDayHeader
+            },
+            month: {
+              header: CustomMonthHeader
+            }
           }}
           min={new Date(0, 0, 0, 8, 0, 0)} // Start at 8 AM
           max={new Date(0, 0, 0, 20, 0, 0)} // End at 8 PM

@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 
 const AdminSettings = () => {
   const [email, setEmail] = useState('');
+  const [admins, setAdmins] = useState([]);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [isLoading, setIsLoading] = useState(false);
   
@@ -20,7 +21,32 @@ const AdminSettings = () => {
 
   useEffect(() => {
     fetchProfile();
+    fetchAdmins();
   }, []);
+
+  const fetchAdmins = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/admin/admins', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAdmins(res.data);
+    } catch (error) {
+      console.error("Failed to fetch admins");
+    }
+  };
+
+  const handleDeleteAdmin = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this admin?')) return;
+    try {
+      await axios.delete(`http://localhost:8000/admin/admins/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setStatus({ type: 'success', message: 'Admin deleted successfully.' });
+      fetchAdmins();
+    } catch (error) {
+      setStatus({ type: 'error', message: error.response?.data?.detail || 'Failed to delete admin.' });
+    }
+  };
 
   const fetchProfile = async () => {
     try {
@@ -116,6 +142,7 @@ const AdminSettings = () => {
       );
       setStatus({ type: 'success', message: `Admin ${email} created successfully.` });
       setEmail('');
+      fetchAdmins();
     } catch (error) {
       setStatus({ type: 'error', message: error.response?.data?.detail || 'Failed to create admin.' });
     } finally {
@@ -308,6 +335,33 @@ const AdminSettings = () => {
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Admin'}
             </button>
         </form>
+
+        <div className="mt-8 pt-6 border-t border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Existing Admins</h3>
+          <div className="divide-y divide-slate-100">
+            {admins.map(admin => (
+              <div key={admin.id} className="py-3 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+                    {admin.email[0].toUpperCase()}
+                  </div>
+                  <span className="text-slate-700 text-sm">{admin.email}</span>
+                </div>
+                {admin.email !== profileData.email && (
+                  <button 
+                    onClick={() => handleDeleteAdmin(admin.id)}
+                    className="text-red-500 hover:text-red-700 text-sm font-medium hover:bg-red-50 px-3 py-1 rounded-lg transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ))}
+            {admins.length === 0 && (
+              <p className="text-slate-500 text-sm py-2">No other admins found.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

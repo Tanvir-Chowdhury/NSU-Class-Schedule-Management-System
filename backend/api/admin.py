@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, case
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 
 from core.database import get_db
@@ -9,18 +9,28 @@ from core.security import get_admin_user, get_password_hash
 from models.academic import Room, Course
 from models.user import User, UserRole
 from models.teacher import Teacher
+from models.admin import Admin
 from models.schedule import ClassSchedule, Section
 from schemas.academic import RoomCreate, Room as RoomSchema, CourseCreate, Course as CourseSchema, PaginatedCourses, PaginatedRooms
 from schemas.teacher import TeacherCreate, Teacher as TeacherSchema, TeacherUpdate, PaginatedTeachers
 from schemas.user import User as UserSchema
-from schemas.schedule import ClassSchedule as ClassScheduleSchema, PaginatedSchedules
+from schemas.schedule import ClassSchedule as ClassScheduleSchema, PaginatedSchedules, ClassScheduleCreate, Section as SectionSchema
 from services.csv_service import parse_course_csv, parse_teacher_csv, parse_room_csv
-from services.scheduler import ScheduleMatrix, schedule_extended_labs, schedule_standard_courses
+from services.scheduler import ScheduleMatrix, schedule_extended_labs, schedule_standard_courses, assign_teachers_to_sections
 from services.rag_service import trigger_rag_update, trigger_rag_delete, trigger_rag_bulk_delete
+from services.indexing_service import index_all_data
 from core.constants import TIME_SLOTS
 
 class BulkDeleteRequest(BaseModel):
     ids: List[int]
+
+class TeacherAssignmentInfo(BaseModel):
+    id: int
+    initial: str
+    name: str
+    contact_details: Optional[str] = None
+    assigned_sections: int
+    status: str
 
 router = APIRouter(
     prefix="/admin",
@@ -558,8 +568,29 @@ def create_admin(admin_data: AdminCreate, db: Session = Depends(get_db)):
     send_email(admin_data.email, subject, body)
     
     return new_admin
+
+@router.get("/admins", response_model=List[UserSchema])
+def read_admins(db: Session = Depends(get_db)):
+    return db.query(User).filter(User.role == UserRole.ADMIN).all()
+
+@router.delete("/admins/{admin_id}")
+def delete_admin(admin_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
+    if current_user.id == admin_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        
+    admin_to_delete = db.query(User).filter(User.id == admin_id, User.role == UserRole.ADMIN).first()
+    if not admin_to_delete:
+        raise HTTPException(status_code=404, detail="Admin not found")
     
-    return new_admin
+    # Manually delete the Admin profile first to avoid foreign key constraint violation
+    # (Since cascade might not be configured on the relationship)
+    admin_profile = db.query(Admin).filter(Admin.user_id == admin_id).first()
+    if admin_profile:
+        db.delete(admin_profile)
+        
+    db.delete(admin_to_delete)
+    db.commit()
+    return {"message": "Admin deleted successfully"}
 
 # --- Scheduler ---
 
@@ -587,6 +618,9 @@ def run_auto_scheduler(background_tasks: BackgroundTasks, db: Session = Depends(
             status_code=400, 
             detail=f"Cannot run auto-scheduler. Missing data: {', '.join(missing)}. Please upload them first."
         )
+
+    # Assign Teachers based on preferences
+    assign_teachers_to_sections(db)
 
     # Initialize Matrix
     matrix = ScheduleMatrix(db)
@@ -691,6 +725,80 @@ def read_schedules(
     schedules = query.offset(skip).limit(limit).all()
     return {"items": schedules, "total": total, "page": page, "size": limit}
 
+@router.get("/sections", response_model=List[SectionSchema])
+def read_all_sections(db: Session = Depends(get_db)):
+    return db.query(Section).all()
+
+@router.post("/schedules", response_model=ClassScheduleSchema)
+def create_schedule(schedule: ClassScheduleCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # Check if section exists
+    section = db.query(Section).filter(Section.id == schedule.section_id).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    # Check if room exists
+    room = db.query(Room).filter(Room.id == schedule.room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # Check for conflicts (Room occupied at that time)
+    conflict = db.query(ClassSchedule).filter(
+        ClassSchedule.room_id == schedule.room_id,
+        ClassSchedule.day == schedule.day,
+        ClassSchedule.time_slot_id == schedule.time_slot_id
+    ).first()
+    
+    if conflict:
+        raise HTTPException(status_code=400, detail="Room is already booked for this time slot")
+
+    new_schedule = ClassSchedule(**schedule.model_dump())
+    db.add(new_schedule)
+    db.commit()
+    db.refresh(new_schedule)
+    
+    # RAG Update
+    time_str = TIME_SLOTS.get(new_schedule.time_slot_id, "Unknown Time")
+    rag_text = f"Class: {new_schedule.section.course.code} - {new_schedule.section.course.title} (Section {new_schedule.section.section_number}). " \
+               f"Teacher: {new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA'}. " \
+               f"Room: {new_schedule.room.room_number}. " \
+               f"Time: {new_schedule.day} {time_str}."
+    
+    trigger_rag_update(
+        background_tasks, 
+        f"schedule_{new_schedule.id}", 
+        rag_text, 
+        {
+            "type": "schedule", 
+            "course_code": new_schedule.section.course.code,
+            "teacher_initial": new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA',
+            "room_number": new_schedule.room.room_number,
+            "day": new_schedule.day
+        }
+    )
+
+    return new_schedule
+
+@router.get("/teacher-assignments", response_model=List[TeacherAssignmentInfo])
+def get_teacher_assignments(db: Session = Depends(get_db)):
+    """
+    Get assignment status for all teachers.
+    """
+    teachers = db.query(Teacher).all()
+    result = []
+    for teacher in teachers:
+        assigned_count = db.query(Section).filter(Section.teacher_id == teacher.id).count()
+        status = "Assigned" if assigned_count > 0 else "Unassigned"
+        
+        result.append({
+            "id": teacher.id,
+            "initial": teacher.initial,
+            "name": teacher.name,
+            "contact_details": teacher.contact_details,
+            "assigned_sections": assigned_count,
+            "status": status
+        })
+    return result
+
 @router.post("/rooms/bulk-delete")
 def delete_rooms_bulk(request: BulkDeleteRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     db.query(Room).filter(Room.id.in_(request.ids)).delete(synchronize_session=False)
@@ -786,4 +894,13 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "classes_per_day": classes_per_day_dict,
         "room_usage": room_usage_list
     }
+
+@router.post("/reindex-rag")
+def reindex_rag_database(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Triggers a full re-indexing of the database into the RAG vector store.
+    """
+    background_tasks.add_task(index_all_data, db)
+    return {"message": "RAG re-indexing started in the background."}
+
 

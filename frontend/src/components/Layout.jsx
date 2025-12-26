@@ -41,7 +41,7 @@ const Layout = ({ children, role = 'student' }) => {
       { name: 'Manage Rooms', href: '/admin/rooms', icon: MapPin },
       { name: 'Manage Preferences', href: '/admin/preferences', icon: ListChecks },
       { name: 'Manage Bookings', href: '/admin/bookings', icon: Bookmark },
-      { name: 'Schedule', href: '/admin/scheduler', icon: Calendar },
+      { name: 'Schedules', href: '/admin/scheduler', icon: Calendar },
       { name: 'Manage Schedules', href: '/admin/schedules', icon: Clock },
       { name: 'Settings', href: '/admin/settings', icon: Settings },
     ],

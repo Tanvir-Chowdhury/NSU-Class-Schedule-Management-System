@@ -13,24 +13,40 @@ import {
 
 const StudentDashboard = () => {
   const { user, token } = useAuth();
-  const [cgpa, setCgpa] = useState('N/A');
+  const [stats, setStats] = useState({
+    enrolled_courses: 0,
+    upcoming_classes: 0,
+    cgpa: 'N/A',
+    total_credits: 0
+  });
+  const [todaySchedule, setTodaySchedule] = useState([]);
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const fetchStats = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/profile/student', {
+        const response = await axios.get('http://localhost:8000/dashboard/student/stats', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (response.data && response.data.cgpa) {
-          setCgpa(response.data.cgpa);
-        }
+        setStats(response.data);
       } catch (error) {
-        console.error("Failed to fetch student profile", error);
+        console.error("Failed to fetch student stats", error);
+      }
+    };
+
+    const fetchSchedule = async () => {
+      try {
+        const res = await axios.get('http://localhost:8000/dashboard/student/today', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTodaySchedule(res.data);
+      } catch (error) {
+        console.error("Failed to fetch today's schedule", error);
       }
     };
     
     if (token) {
-      fetchProfile();
+      fetchStats();
+      fetchSchedule();
     }
   }, [token]);
 
@@ -71,28 +87,28 @@ const StudentDashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           title="Enrolled Courses" 
-          value="4" 
+          value={stats.enrolled_courses} 
           icon={BookOpen} 
           color="text-indigo-600" 
           bgColor="bg-indigo-50" 
         />
         <StatCard 
-          title="Upcoming Classes" 
-          value="2" 
+          title="Today's Classes" 
+          value={stats.upcoming_classes} 
           icon={Clock} 
           color="text-orange-600" 
           bgColor="bg-orange-50" 
         />
         <StatCard 
           title="Current CGPA" 
-          value={cgpa} 
+          value={stats.cgpa} 
           icon={GraduationCap} 
           color="text-emerald-600" 
           bgColor="bg-emerald-50" 
         />
         <StatCard 
-          title="Study Hours" 
-          value="12h" 
+          title="Total Credits" 
+          value={stats.total_credits} 
           icon={Calendar} 
           color="text-blue-600" 
           bgColor="bg-blue-50" 
@@ -137,29 +153,32 @@ const StudentDashboard = () => {
           <span className="text-sm text-slate-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
         </div>
         <div className="divide-y divide-slate-100">
-          {[
-            { time: '09:40 AM - 11:10 AM', code: 'CSE327', title: 'Software Engineering', room: 'NAC514', type: 'Lecture' },
-            { time: '11:20 AM - 12:50 PM', code: 'CSE311', title: 'Database Systems', room: 'NAC601', type: 'Lab' },
-          ].map((cls, idx) => (
-            <div key={idx} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg font-semibold text-sm whitespace-nowrap">
-                  {cls.time}
+          {todaySchedule.length > 0 ? (
+            todaySchedule.map((cls, idx) => (
+              <div key={idx} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg font-semibold text-sm whitespace-nowrap">
+                    {cls.time}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900">{cls.code} - {cls.title}</h4>
+                    <p className="text-sm text-slate-500">{cls.type} • {cls.room} • Section {cls.section}</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-semibold text-slate-900">{cls.code} - {cls.title}</h4>
-                  <p className="text-sm text-slate-500">{cls.type} • {cls.room}</p>
+                <div className="hidden sm:block">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    cls.type === 'Lab' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {cls.type}
+                  </span>
                 </div>
               </div>
-              <div className="hidden sm:block">
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  cls.type === 'Lab' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-                }`}>
-                  {cls.type}
-                </span>
-              </div>
+            ))
+          ) : (
+            <div className="p-8 text-center text-slate-500">
+              No classes scheduled for today.
             </div>
-          ))}
+          )}
         </div>
         <div className="p-4 bg-slate-50 border-t border-slate-200 text-center">
           <Link to="/student/schedule" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">

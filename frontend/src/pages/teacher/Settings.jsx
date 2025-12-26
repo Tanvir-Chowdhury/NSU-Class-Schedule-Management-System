@@ -197,13 +197,11 @@ const TeacherSettings = () => {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-700">Initial</label>
                     <div className="relative">
-                      <Briefcase className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
                       <input
                           type="text"
                           value={profileData.initial}
-                          onChange={(e) => setProfileData({ ...profileData, initial: e.target.value })}
-                          className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                          placeholder="e.g. ABC"
+                          readOnly
+                          className="w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-500 cursor-not-allowed focus:outline-none"
                       />
                     </div>
                   </div>

@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_active_user, get_admin_user
+from core.constants import TIME_SLOTS
 from models.booking import BookingRequest, BookingStatus
 from models.schedule import ClassSchedule
 from models.academic import Room, ClassType
@@ -174,6 +175,42 @@ def create_booking_request(
     db.refresh(new_booking)
     return new_booking
 
+@router.delete("/request/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_booking_request(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Delete a booking request.
+    Allowed only if the scheduled time has not passed.
+    """
+    booking = db.query(BookingRequest).filter(
+        BookingRequest.id == booking_id,
+        BookingRequest.user_id == current_user.id
+    ).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking request not found")
+
+    # Calculate booking start datetime
+    time_str = TIME_SLOTS.get(booking.time_slot_id)
+    if not time_str:
+        # Should not happen if data is consistent
+        raise HTTPException(status_code=400, detail="Invalid time slot")
+    
+    start_time_str = time_str.split(" - ")[0] # "08:00 AM"
+    start_time = datetime.strptime(start_time_str, "%I:%M %p").time()
+    
+    booking_datetime = datetime.combine(booking.booking_date, start_time)
+    
+    if datetime.now() >= booking_datetime:
+        raise HTTPException(status_code=400, detail="Cannot delete booking: Scheduled time has passed.")
+
+    db.delete(booking)
+    db.commit()
+    return None
+
 @router.get("/my-requests", response_model=List[BookingRequestSchema])
 def read_my_bookings(
     db: Session = Depends(get_db), 
@@ -191,7 +228,11 @@ def read_all_bookings(db: Session = Depends(get_db)):
     """
     Admin: Get all booking requests.
     """
-    return db.query(BookingRequest).order_by(desc(BookingRequest.id)).all()
+    return db.query(BookingRequest).options(
+        joinedload(BookingRequest.room),
+        joinedload(BookingRequest.user).joinedload(User.teacher_profile),
+        joinedload(BookingRequest.user).joinedload(User.student_profile)
+    ).order_by(desc(BookingRequest.id)).all()
 
 @router.put("/admin/requests/{booking_id}", response_model=BookingRequestSchema, dependencies=[Depends(get_admin_user)])
 def update_booking_status(

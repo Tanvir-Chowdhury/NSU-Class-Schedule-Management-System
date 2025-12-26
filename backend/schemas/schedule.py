@@ -32,6 +32,9 @@ class ClassSchedule(ClassScheduleBase):
     class Config:
         from_attributes = True
 
+class ClassScheduleCreate(ClassScheduleBase):
+    pass
+
 class PaginatedSchedules(BaseModel):
     items: List[ClassSchedule]
     total: int

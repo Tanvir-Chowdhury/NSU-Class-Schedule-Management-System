@@ -11,6 +11,7 @@ const ManagePreferences = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [submissionEnabled, setSubmissionEnabled] = useState(true);
+  const [sortConfig, setSortConfig] = useState({ key: 'initial', direction: 'asc' });
 
   useEffect(() => {
     fetchPreferences();
@@ -59,10 +60,27 @@ const ManagePreferences = () => {
     setStatus('');
     setLoading(true);
     try {
-      await axios.post(`http://localhost:8000/admin/preferences/${action}-all`, {}, {
+      // We need to filter pending ones first if the backend endpoint processes all.
+      // Assuming backend endpoint processes all pending if no IDs provided, or we should provide IDs.
+      // The current backend implementation for bulk-action usually takes IDs or processes all pending.
+      // Let's check the backend code or assume we should send IDs of all pending items.
+      // Since we don't have a "select all pending" button but "Accept All" button, 
+      // let's filter all pending from the current list and send them.
+      
+      const allPendingIds = preferences.filter(p => p.status === 'pending').map(p => p.id);
+      
+      if (allPendingIds.length === 0) {
+        setStatus('No pending requests to process.');
+        setLoading(false);
+        return;
+      }
+
+      await Promise.all(allPendingIds.map(id => axios.post(`http://localhost:8000/admin/preferences/${action}/${id}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
-      });
+      })));
+      
       fetchPreferences();
+      setStatus(`Successfully ${action === 'accept' ? 'accepted' : 'rejected'} all pending requests.`);
     } catch (error) {
       setStatus('Bulk action failed');
     } finally {
@@ -116,18 +134,68 @@ const ManagePreferences = () => {
     setStatus('');
     setLoading(true);
     try {
-      if (selectedIds.length === 0) return;
-      await Promise.all(selectedIds.map(id => axios.post(`http://localhost:8000/admin/preferences/${action}/${id}`, {}, {
+      // Filter for pending requests only
+      const pendingSelectedIds = selectedIds.filter(id => {
+        const pref = preferences.find(p => p.id === id);
+        return pref && pref.status === 'pending';
+      });
+
+      if (pendingSelectedIds.length === 0) {
+        setStatus('No pending requests selected.');
+        setLoading(false);
+        return;
+      }
+
+      await Promise.all(pendingSelectedIds.map(id => axios.post(`http://localhost:8000/admin/preferences/${action}/${id}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       })));
       setSelectedIds([]);
       fetchPreferences();
+      setStatus(`Successfully ${action === 'accept' ? 'accepted' : 'rejected'} ${pendingSelectedIds.length} requests.`);
     } catch (error) {
       setStatus('Bulk action failed');
     } finally {
       setLoading(false);
     }
   };
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const sortedPreferences = [...filteredPreferences].sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    
+    let aValue, bValue;
+    
+    if (sortConfig.key === 'initial') {
+      aValue = a.teacher?.initial || '';
+      bValue = b.teacher?.initial || '';
+    } else if (sortConfig.key === 'name') {
+      aValue = a.teacher?.name || '';
+      bValue = b.teacher?.name || '';
+    } else if (sortConfig.key === 'course') {
+      aValue = a.course?.code || '';
+      bValue = b.course?.code || '';
+    } else if (sortConfig.key === 'sections') {
+      aValue = a.section_count || 0;
+      bValue = b.section_count || 0;
+    } else if (sortConfig.key === 'credits') {
+      aValue = (a.course?.credits || 0) * (a.section_count || 0);
+      bValue = (b.course?.credits || 0) * (b.section_count || 0);
+    } else if (sortConfig.key === 'status') {
+      aValue = a.status || '';
+      bValue = b.status || '';
+    }
+
+    if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+    return 0;
+  });
 
   return (
     <div className="max-w-6xl mx-auto p-8">
@@ -175,7 +243,7 @@ const ManagePreferences = () => {
               onClick={() => handleBulk('accept')}
               className="inline-flex items-center px-4 py-2 bg-green-100 hover:bg-green-200 text-green-800 font-medium rounded-lg transition-colors shadow-sm border border-green-200"
             >
-              <CheckCircle className="h-4 w-4 mr-2" /> Accept All
+              <CheckCircle className="h-4 w-4 mr-2" /> Approve All
             </button>
             <button
               onClick={() => handleBulk('reject')}
@@ -217,27 +285,27 @@ const ManagePreferences = () => {
                       onChange={handleSelectAll}
                     />
                   </th>
-                  <th className="px-6 py-4">Initial</th>
-                  <th className="px-6 py-4">Name</th>
-                  <th className="px-6 py-4">Courses</th>
-                  <th className="px-6 py-4">Sections</th>
-                  <th className="px-6 py-4">Credits</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('initial')}>Initial</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('name')}>Name</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('course')}>Courses</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('sections')}>Sections</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('credits')}>Credits</th>
                   <th className="px-6 py-4 text-center">Contact</th>
-                  <th className="px-6 py-4 text-center">Status</th>
+                  <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100" onClick={() => handleSort('status')}>Status</th>
                   <th className="px-6 py-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan="8" className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan="9" className="px-6 py-8 text-center text-slate-500">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-indigo-600" />
                       Loading preferences...
                     </td>
                   </tr>
-                ) : filteredPreferences.length === 0 ? (
+                ) : sortedPreferences.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan="9" className="px-6 py-12 text-center text-slate-500">
                       <div className="flex flex-col items-center justify-center">
                           <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
                               <MessageSquare className="h-6 w-6 text-slate-400" />
@@ -250,7 +318,7 @@ const ManagePreferences = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredPreferences.map((pref) => (
+                  sortedPreferences.map((pref) => (
                     <tr key={pref.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-6 py-4">
                         <input

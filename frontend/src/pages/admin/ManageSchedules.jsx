@@ -11,7 +11,8 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Mail
 } from 'lucide-react';
 
 const TIME_SLOTS = {
@@ -37,6 +38,17 @@ const ManageSchedules = () => {
     total: 0,
     total_pages: 0
   });
+  const [teacherAssignments, setTeacherAssignments] = useState([]);
+  const [sections, setSections] = useState([]);
+  const [rooms, setRooms] = useState([]);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newSchedule, setNewSchedule] = useState({
+    section_id: '',
+    room_id: '',
+    day: 'ST',
+    time_slot_id: 1,
+    is_friday_booking: false
+  });
   
   const { token } = useAuth();
 
@@ -53,8 +65,44 @@ const ManageSchedules = () => {
 
   useEffect(() => {
     fetchSchedules();
+    fetchTeacherAssignments();
+    fetchSections();
+    fetchRooms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.page, debouncedSearchQuery, sortConfig]);
+
+  const fetchSections = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/admin/sections', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSections(res.data);
+    } catch (error) {
+      console.error("Failed to fetch sections");
+    }
+  };
+
+  const fetchRooms = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/admin/rooms?limit=1000', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setRooms(res.data.items || []);
+    } catch (error) {
+      console.error("Failed to fetch rooms");
+    }
+  };
+
+  const fetchTeacherAssignments = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/admin/teacher-assignments', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTeacherAssignments(res.data);
+    } catch (error) {
+      console.error("Failed to fetch teacher assignments");
+    }
+  };
 
   const fetchSchedules = async () => {
     setIsLoading(true);
@@ -89,6 +137,27 @@ const ManageSchedules = () => {
       setStatus({ type: 'error', message: 'Failed to load schedules.' });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAddSchedule = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post('http://localhost:8000/admin/schedules', newSchedule, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setStatus({ type: 'success', message: 'Schedule added successfully.' });
+      setIsAddModalOpen(false);
+      fetchSchedules();
+      setNewSchedule({
+        section_id: '',
+        room_id: '',
+        day: 'ST',
+        time_slot_id: 1,
+        is_friday_booking: false
+      });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.response?.data?.detail || 'Failed to add schedule.' });
     }
   };
 
@@ -175,6 +244,13 @@ const ManageSchedules = () => {
         </div>
         
         <div>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm mr-2"
+          >
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Add Schedule
+          </button>
           <button
             onClick={handleDeleteAll}
             className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors shadow-sm mr-2"
@@ -319,7 +395,7 @@ const ManageSchedules = () => {
                       {schedule.section?.section_number}
                     </td>
                     <td className="px-6 py-4 text-slate-600">
-                      {schedule.section?.teacher?.initial}
+                      {schedule.section?.teacher?.initial || 'TBA'}
                     </td>
                     <td className="px-6 py-4 text-slate-600">
                       <div className="flex flex-col">
@@ -377,6 +453,173 @@ const ManageSchedules = () => {
           </div>
         </div>
       </div>
+
+      {/* Teacher Assignment Overview */}
+      <div className="mt-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-4">Teacher Assignment Overview</h2>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                          <th className="px-6 py-4">Initial</th>
+                          <th className="px-6 py-4">Name</th>
+                          <th className="px-6 py-4 text-center">Assigned Sections</th>
+                          <th className="px-6 py-4 text-center">Status</th>
+                          <th className="px-6 py-4 text-center">Contact</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                      {teacherAssignments.map(teacher => (
+                          <tr key={teacher.id} className="hover:bg-slate-50/50">
+                              <td className="px-6 py-4 font-medium">{teacher.initial}</td>
+                              <td className="px-6 py-4">{teacher.name}</td>
+                              <td className="px-6 py-4 text-center">{teacher.assigned_sections}</td>
+                              <td className="px-6 py-4 text-center">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                      teacher.status === 'Assigned' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                      {teacher.status}
+                                  </span>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                  {teacher.status === 'Unassigned' && (
+                                      <a href={`mailto:${teacher.contact_details || ''}`} className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" title="Contact Teacher">
+                                          <Mail className="h-4 w-4" />
+                                      </a>
+                                  )}
+                              </td>
+                          </tr>
+                      ))}
+                      {teacherAssignments.length === 0 && (
+                          <tr>
+                              <td colSpan="5" className="px-6 py-8 text-center text-slate-500">
+                                  No teacher data available.
+                              </td>
+                          </tr>
+                      )}
+                  </tbody>
+              </table>
+          </div>
+      </div>
+
+      {/* Add Schedule Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-lg text-slate-800">Add New Schedule</h3>
+              <button 
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddSchedule} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Section</label>
+                <select
+                  required
+                  className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                  value={newSchedule.section_id}
+                  onChange={(e) => setNewSchedule({...newSchedule, section_id: e.target.value})}
+                >
+                  <option value="">Select Section</option>
+                  {sections.map(section => (
+                    <option key={section.id} value={section.id}>
+                      {section.course?.code} - Section {section.section_number} ({section.teacher?.initial || 'TBA'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Room</label>
+                <select
+                  required
+                  className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                  value={newSchedule.room_id}
+                  onChange={(e) => setNewSchedule({...newSchedule, room_id: e.target.value})}
+                >
+                  <option value="">Select Room</option>
+                  {rooms.map(room => (
+                    <option key={room.id} value={room.id}>
+                      {room.room_number} (Cap: {room.capacity})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Day</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={newSchedule.day}
+                    onChange={(e) => setNewSchedule({...newSchedule, day: e.target.value})}
+                  >
+                    <option value="ST">ST (Sun/Tue)</option>
+                    <option value="MW">MW (Mon/Wed)</option>
+                    <option value="RA">RA (Thu)</option>
+                    <option value="Sunday">Sunday</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Time Slot</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={newSchedule.time_slot_id}
+                    onChange={(e) => setNewSchedule({...newSchedule, time_slot_id: parseInt(e.target.value)})}
+                  >
+                    {Object.entries(TIME_SLOTS).map(([id, time]) => (
+                      <option key={id} value={id}>{time}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="is_friday"
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  checked={newSchedule.is_friday_booking}
+                  onChange={(e) => setNewSchedule({...newSchedule, is_friday_booking: e.target.checked})}
+                />
+                <label htmlFor="is_friday" className="text-sm text-slate-700">Is Friday Booking?</label>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+                >
+                  Add Schedule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

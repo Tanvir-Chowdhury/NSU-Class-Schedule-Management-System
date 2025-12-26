@@ -300,22 +300,42 @@ const ManageTeachers = () => {
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-4">Department</th>
-                <th className="px-6 py-4">Faculty Type</th>
+                <th 
+                  className="px-6 py-4 cursor-pointer hover:bg-slate-100 transition-colors"
+                  onClick={() => handleSort('department')}
+                >
+                  <div className="flex items-center gap-2">
+                    Department
+                    {sortConfig.key === 'department' && (
+                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-4 cursor-pointer hover:bg-slate-100 transition-colors"
+                  onClick={() => handleSort('faculty_type')}
+                >
+                  <div className="flex items-center gap-2">
+                    Faculty Type
+                    {sortConfig.key === 'faculty_type' && (
+                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan="4" className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan="6" className="px-6 py-8 text-center text-slate-500">
                     <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-indigo-600" />
                     Loading teachers...
                   </td>
                 </tr>
               ) : teachers.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                         <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
                             <Users className="h-6 w-6 text-slate-400" />
@@ -386,13 +406,11 @@ const ManageTeachers = () => {
                           className="w-full px-2 py-1 border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                         >
                           <option value="Permanent">Permanent</option>
-                          <option value="Contractual">Contractual</option>
-                          <option value="Visiting">Visiting</option>
+                          <option value="Adjunct">Adjunct</option>
                         </select>
                       ) : (
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           teacher.faculty_type === 'Permanent' ? 'bg-green-100 text-green-800' :
-                          teacher.faculty_type === 'Contractual' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-blue-100 text-blue-800'
                         }`}>
                           {teacher.faculty_type || 'Permanent'}
@@ -541,8 +559,7 @@ const ManageTeachers = () => {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 >
                   <option value="Permanent">Permanent</option>
-                  <option value="Contractual">Contractual</option>
-                  <option value="Visiting">Visiting</option>
+                  <option value="Adjunct">Adjunct</option>
                 </select>
               </div>
 

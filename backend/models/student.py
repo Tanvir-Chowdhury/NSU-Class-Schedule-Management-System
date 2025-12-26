@@ -16,6 +16,21 @@ class Student(Base):
     profile_picture = Column(String, nullable=True)
 
     user = relationship("User", back_populates="student_profile")
+    enrollments = relationship("Enrollment", back_populates="student")
 
     def __repr__(self):
         return f"<Student(nsu_id='{self.nsu_id}', cgpa={self.cgpa})>"
+
+class Enrollment(Base):
+    """
+    SQLAlchemy model for Student Enrollments in Sections.
+    """
+    __tablename__ = "enrollments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    section_id = Column(Integer, ForeignKey("sections.id"), nullable=False)
+    
+    student = relationship("Student", back_populates="enrollments")
+    section = relationship("Section")
+

@@ -13,11 +13,23 @@ from models.academic import Course
 from models.schedule import ClassSchedule, Section
 from models.booking import BookingRequest
 from services.google_calendar import get_google_auth_url, get_credentials_from_code, sync_schedule
+from core.constants import TIME_SLOTS
 
 router = APIRouter(
     prefix="/calendar",
     tags=["Calendar"]
 )
+
+def get_start_time_from_slot(slot_id: int) -> str:
+    time_range = TIME_SLOTS.get(slot_id)
+    if not time_range:
+        return "00:00"
+    start_str = time_range.split(" - ")[0]
+    try:
+        dt = datetime.strptime(start_str, "%I:%M %p")
+        return dt.strftime("%H:%M")
+    except ValueError:
+        return "00:00"
 
 @router.get("/my-schedule", response_model=List[Dict[str, Any]])
 def get_my_schedule(
@@ -33,24 +45,14 @@ def get_my_schedule(
             schedules = db.query(ClassSchedule).join(Section).filter(Section.teacher_id == teacher.id).all()
             for sch in schedules:
                 course = sch.section.course
-                duration_minutes = 190 if course.duration_mode == "EXTENDED" else 90 # 3h 10m = 190m, 1h 30m = 90m
-                
-                # We need to convert day/time to actual dates for the calendar view.
-                # However, react-big-calendar handles recurring events differently or we generate them for a range.
-                # For simplicity, we will return the raw schedule info and let frontend generate events for the current week,
-                # OR we generate events for the current week here.
-                # Let's return the raw schedule data with a type 'class' and let frontend handle recurrence.
-                # Actually, react-big-calendar expects specific dates.
-                # Let's generate events for the next 4 weeks? Or just return the pattern.
-                # The prompt says "Event Mapping... set event end time to Start + ...".
-                # This implies we should return objects that can be easily mapped.
+                duration_minutes = 190 if course.duration_mode == "EXTENDED" else 90
                 
                 events.append({
                     "id": f"class-{sch.id}",
                     "title": f"{course.code} - {course.title}",
                     "type": "class",
                     "day": sch.day,
-                    "start_time": sch.start_time.strftime("%H:%M"),
+                    "start_time": get_start_time_from_slot(sch.time_slot_id),
                     "duration_minutes": duration_minutes,
                     "room": sch.room.room_number if sch.room else "TBA",
                     "section": sch.section.section_number
@@ -59,11 +61,8 @@ def get_my_schedule(
     elif current_user.role == "STUDENT":
         student = db.query(Student).filter(Student.user_id == current_user.id).first()
         if student:
-            # Assuming student.sections is a relationship to Section
-            # We need to join ClassSchedule
-            # This depends on how enrollment is modeled. 
-            # If Student has many-to-many with Section:
-            for section in student.sections:
+            for enrollment in student.enrollments:
+                section = enrollment.section
                 schedules = db.query(ClassSchedule).filter(ClassSchedule.section_id == section.id).all()
                 for sch in schedules:
                     course = section.course
@@ -73,7 +72,7 @@ def get_my_schedule(
                         "title": f"{course.code} - {course.title}",
                         "type": "class",
                         "day": sch.day,
-                        "start_time": sch.start_time.strftime("%H:%M"),
+                        "start_time": get_start_time_from_slot(sch.time_slot_id),
                         "duration_minutes": duration_minutes,
                         "room": sch.room.room_number if sch.room else "TBA",
                         "section": section.section_number
@@ -86,19 +85,7 @@ def get_my_schedule(
     ).all()
 
     for booking in bookings:
-        # Bookings are one-time events with a specific date
-        # We need to calculate end time based on slot or just assume 90 mins?
-        # The booking has time_slot_id. We need to map that to time.
-        # For now, let's assume standard 90 mins for slots.
-        # Slot 1: 08:00, Slot 2: 09:40, etc.
-        # We should probably have a helper for this.
-        
-        # Mapping slot ID to start time (approximate based on frontend constant)
-        slot_map = {
-            1: "08:00", 2: "09:40", 3: "11:20", 4: "13:00", 
-            5: "14:40", 6: "16:20", 7: "18:00"
-        }
-        start_time_str = slot_map.get(booking.time_slot_id, "08:00")
+        start_time_str = get_start_time_from_slot(booking.time_slot_id)
         
         events.append({
             "id": f"booking-{booking.id}",

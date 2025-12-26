@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from schemas.academic import Course
 
 class OfficeHourBase(BaseModel):
@@ -48,7 +48,7 @@ class TeacherBase(BaseModel):
     research_interests: Optional[str] = None
     projects: Optional[str] = None
     contact_details: Optional[str] = None
-    faculty_type: Optional[str] = None
+    faculty_type: Optional[Literal["Permanent", "Adjunct"]] = None
     department: Optional[str] = None
 
 class TeacherUpdate(BaseModel):
@@ -59,7 +59,7 @@ class TeacherUpdate(BaseModel):
     research_interests: Optional[str] = None
     projects: Optional[str] = None
     contact_details: Optional[str] = None
-    faculty_type: Optional[str] = None
+    faculty_type: Optional[Literal["Permanent", "Adjunct"]] = None
     department: Optional[str] = None
     office_hours: Optional[List[OfficeHourCreate]] = None
     timing_preferences: Optional[List[TeacherTimingPreferenceCreate]] = None

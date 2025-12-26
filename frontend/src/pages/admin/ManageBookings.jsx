@@ -20,6 +20,8 @@ const ManageBookings = () => {
   const [bookings, setBookings] = useState([]);
   const [status, setStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
+  const [selectedIds, setSelectedIds] = useState([]);
 
   useEffect(() => {
     fetchBookings();
@@ -62,17 +64,42 @@ const ManageBookings = () => {
   };
 
   const handleBulkAction = async (action) => {
-    if (!window.confirm(`Are you sure you want to ${action.toLowerCase()} all pending requests?`)) return;
+    // Filter for pending requests only
+    const pendingSelectedIds = selectedIds.length > 0 
+      ? selectedIds.filter(id => {
+          const booking = bookings.find(b => b.id === id);
+          return booking && booking.status === 'PENDING';
+        })
+      : bookings.filter(b => b.status === 'PENDING').map(b => b.id);
+
+    if (pendingSelectedIds.length === 0) {
+      setStatus('No pending requests to process.');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to ${action.toLowerCase()} ${pendingSelectedIds.length} pending requests?`)) return;
     
     setStatus('');
     setLoading(true);
     
     try {
-      const response = await axios.put('http://localhost:8000/bookings/admin/bulk-action', 
-        { action: action }, 
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setStatus(response.data.message);
+      // The backend bulk-action endpoint might expect 'action' and maybe 'ids' if we want to be specific.
+      // If the backend supports filtering by IDs, we should send them.
+      // If not, and it just does "all pending", then we can't select specific ones easily without loop.
+      // Let's assume we loop for now to be safe and support selection, or check if backend supports list.
+      // The previous code used /bulk-action with { action: ... }. This likely did ALL pending.
+      // To support "Selected", we should probably loop or update backend.
+      // Given I can't easily update backend logic without reading it, I'll loop for selected, 
+      // and use the bulk endpoint only if "All" is intended (but user said "Accept Selected").
+      
+      await Promise.all(pendingSelectedIds.map(id => 
+        axios.put(`http://localhost:8000/bookings/admin/requests/${id}`, { status: action }, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ));
+
+      setStatus(`Successfully ${action === 'APPROVED' ? 'approved' : 'rejected'} ${pendingSelectedIds.length} requests.`);
+      setSelectedIds([]);
       fetchBookings();
     } catch (error) {
       console.error(`Failed to ${action} bookings`, error);
@@ -82,16 +109,64 @@ const ManageBookings = () => {
     }
   };
 
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      setSelectedIds(filteredBookings.map(b => b.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectOne = (id) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter(sid => sid !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
   const filteredBookings = bookings.filter(booking => {
     const room = booking.room?.room_number || '';
-    const user = booking.user?.email || ''; // Assuming user relationship is loaded or we need to fix backend
-    // Note: The current BookingRequest schema in backend/models/booking.py has user relationship.
-    // But Pydantic schema might not include it fully nested. Let's check schema later if needed.
-    // For now, we'll search by what we have.
     return (
       room.toLowerCase().includes(searchQuery.toLowerCase()) ||
       booking.reason.toLowerCase().includes(searchQuery.toLowerCase())
     );
+  });
+
+  const sortedBookings = [...filteredBookings].sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    
+    let aValue, bValue;
+    
+    if (sortConfig.key === 'date') {
+      aValue = new Date(a.booking_date);
+      bValue = new Date(b.booking_date);
+    } else if (sortConfig.key === 'time') {
+      aValue = a.time_slot_id;
+      bValue = b.time_slot_id;
+    } else if (sortConfig.key === 'room') {
+      aValue = a.room?.room_number || '';
+      bValue = b.room?.room_number || '';
+    } else if (sortConfig.key === 'requester') {
+      // Try to get name or initial
+      aValue = a.user?.teacher_profile?.initial || a.user?.full_name || a.user_id;
+      bValue = b.user?.teacher_profile?.initial || b.user?.full_name || b.user_id;
+    } else if (sortConfig.key === 'status') {
+      aValue = a.status;
+      bValue = b.status;
+    }
+
+    if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+    return 0;
   });
 
   return (
@@ -103,17 +178,33 @@ const ManageBookings = () => {
             <p className="text-slate-500">Review and approve/reject room booking requests.</p>
           </div>
           <div className="flex gap-2">
+            {selectedIds.length > 0 && (
+              <>
+                <button
+                  onClick={() => handleBulkAction('APPROVED')}
+                  className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" /> Accept Selected ({selectedIds.length})
+                </button>
+                <button
+                  onClick={() => handleBulkAction('REJECTED')}
+                  className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+                >
+                  <XCircle className="h-4 w-4 mr-2" /> Reject Selected ({selectedIds.length})
+                </button>
+              </>
+            )}
             <button
-              onClick={() => handleBulkAction('APPROVED')}
-              className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+              onClick={() => { setSelectedIds([]); handleBulkAction('APPROVED'); }}
+              className="inline-flex items-center px-4 py-2 bg-green-100 hover:bg-green-200 text-green-800 font-medium rounded-lg transition-colors shadow-sm border border-green-200"
             >
-              <CheckCircle className="h-4 w-4 mr-2" /> Approve All Pending
+              <CheckCircle className="h-4 w-4 mr-2" /> Approve All
             </button>
             <button
-              onClick={() => handleBulkAction('REJECTED')}
-              className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+              onClick={() => { setSelectedIds([]); handleBulkAction('REJECTED'); }}
+              className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 font-medium rounded-lg transition-colors shadow-sm border border-red-200"
             >
-              <XCircle className="h-4 w-4 mr-2" /> Reject All Pending
+              <XCircle className="h-4 w-4 mr-2" /> Reject All
             </button>
           </div>
         </div>
@@ -145,32 +236,56 @@ const ManageBookings = () => {
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4">Date</th>
-                  <th className="px-6 py-4">Time</th>
-                  <th className="px-6 py-4">Room</th>
-                  <th className="px-6 py-4">Requester</th>
+                  <th className="px-6 py-4 w-10">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      checked={selectedIds.length > 0 && selectedIds.length === filteredBookings.length}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('date')}>Date</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('time')}>Time</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('room')}>Room</th>
+                  <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('requester')}>Requester</th>
                   <th className="px-6 py-4">Reason</th>
-                  <th className="px-6 py-4 text-center">Status</th>
+                  <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100" onClick={() => handleSort('status')}>Status</th>
                   <th className="px-6 py-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan="8" className="px-6 py-8 text-center text-slate-500">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-indigo-600" />
                       Loading bookings...
                     </td>
                   </tr>
-                ) : filteredBookings.length === 0 ? (
+                ) : sortedBookings.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
-                      No booking requests found.
+                    <td colSpan="8" className="px-6 py-12 text-center text-slate-500">
+                      <div className="flex flex-col items-center justify-center">
+                          <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                              <MessageSquare className="h-6 w-6 text-slate-400" />
+                          </div>
+                          <p className="font-medium text-slate-900">No booking requests found</p>
+                          <p className="text-sm mt-1">
+                            {searchQuery ? 'Try adjusting your search terms.' : 'No requests to review.'}
+                          </p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  filteredBookings.map((booking) => (
+                  sortedBookings.map((booking) => (
                     <tr key={booking.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          checked={selectedIds.includes(booking.id)}
+                          onChange={() => handleSelectOne(booking.id)}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-slate-400" />
@@ -180,7 +295,7 @@ const ManageBookings = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <Clock className="h-4 w-4 text-slate-400" />
-                          {TIME_SLOTS.find(s => s.id === booking.time_slot_id)?.label.split(' - ')[0]}
+                          {TIME_SLOTS.find(s => s.id === booking.time_slot_id)?.label}
                         </div>
                       </td>
                       <td className="px-6 py-4 font-medium">
@@ -190,8 +305,7 @@ const ManageBookings = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {/* We might need to fetch user details if not in schema, but let's try accessing it */}
-                        {booking.user_id} 
+                        {booking.user?.teacher_profile?.initial || booking.user?.full_name || booking.user_id}
                       </td>
                       <td className="px-6 py-4 max-w-xs truncate" title={booking.reason}>
                         {booking.reason}

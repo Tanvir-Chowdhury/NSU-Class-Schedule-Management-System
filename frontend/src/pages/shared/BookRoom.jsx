@@ -9,7 +9,9 @@ import {
   CheckCircle, 
   XCircle, 
   Loader2,
-  Filter
+  Search,
+  Trash2,
+  Filter,
 } from 'lucide-react';
 
 const TIME_SLOTS = [
@@ -78,6 +80,19 @@ const BookRoom = () => {
       setStatus({ type: 'error', message: 'Failed to load room availability.' });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this booking request?')) return;
+    
+    try {
+      await axios.delete(`http://localhost:8000/bookings/request/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchMyBookings();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to delete booking');
     }
   };
 
@@ -268,12 +283,13 @@ const BookRoom = () => {
                   <th className="px-6 py-4">Room</th>
                   <th className="px-6 py-4">Reason</th>
                   <th className="px-6 py-4 text-center">Status</th>
+                  <th className="px-6 py-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {myBookings.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan="6" className="px-6 py-8 text-center text-slate-500">
                       No booking requests found.
                     </td>
                   </tr>
@@ -288,6 +304,15 @@ const BookRoom = () => {
                         {booking.status === 'PENDING' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-100">Pending</span>}
                         {booking.status === 'APPROVED' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-100">Approved</span>}
                         {booking.status === 'REJECTED' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100">Rejected</span>}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button 
+                          onClick={() => handleDelete(booking.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                          title="Delete Booking"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </td>
                     </tr>
                   ))
