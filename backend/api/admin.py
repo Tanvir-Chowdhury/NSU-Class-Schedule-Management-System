@@ -22,6 +22,8 @@ from services.rag_service import trigger_rag_update, trigger_rag_delete, trigger
 from services.indexing_service import index_all_data
 from core.constants import TIME_SLOTS
 
+from services.cp_sat_scheduler import CpSatAutoScheduler
+
 class BulkDeleteRequest(BaseModel):
     ids: List[int]
 
@@ -654,77 +656,31 @@ def delete_admin(admin_id: int, db: Session = Depends(get_db), current_user: Use
 
 @router.post("/schedule/auto")
 def run_auto_scheduler(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """
-    Runs the auto-scheduler algorithm.
-    1. Checks if Rooms, Teachers, and Courses exist.
-    2. Clears existing auto-generated schedules (optional, but good for idempotency).
-    3. Runs Pass 1: Extended Labs.
-    4. Runs Pass 2: Standard Courses.
-    """
-    # Check for prerequisites
-    room_count = db.query(Room).count()
-    teacher_count = db.query(Teacher).count()
-    course_count = db.query(Course).count()
-
-    if room_count == 0 or teacher_count == 0 or course_count == 0:
-        missing = []
-        if room_count == 0: missing.append("Rooms")
-        if teacher_count == 0: missing.append("Teachers")
-        if course_count == 0: missing.append("Courses")
-        
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Cannot run auto-scheduler. Missing data: {', '.join(missing)}. Please upload them first."
-        )
-
-    # Assign Teachers based on preferences
-    assign_teachers_to_sections(db)
-
-    # Initialize Matrix
-    matrix = ScheduleMatrix(db)
+    # ... checks ...
+    scheduler = CpSatAutoScheduler(time_limit_seconds=30.0, seed=1)
+    result = scheduler.run(db, rebuild=True)
     
-    # Run Pass 1
-    labs_scheduled = schedule_extended_labs(db, matrix)
-    
-    # Run Pass 2
-    standard_scheduled = schedule_standard_courses(db, matrix)
+    # Trigger RAG Update
+    # from services.indexing_service import index_all_data
+    # background_tasks.add_task(index_all_data, db)
 
-    # RAG Update: Re-index all schedules
-    schedules = db.query(ClassSchedule).join(Section).join(Course).join(Room).join(Teacher, Section.teacher_id == Teacher.id).all()
-    
-    for schedule in schedules:
-        time_str = TIME_SLOTS.get(schedule.time_slot_id, "Unknown Time")
-        rag_data = {
-            "type": "schedule",
-            "course_code": schedule.section.course.code,
-            "course_title": schedule.section.course.title,
-            "section_number": schedule.section.section_number,
-            "teacher_initial": schedule.section.teacher.initial,
-            "room_number": schedule.room.room_number,
-            "day": schedule.day,
-            "time": time_str,
-            "description": f"Class: {schedule.section.course.code} - {schedule.section.course.title} (Section {schedule.section.section_number}). Teacher: {schedule.section.teacher.initial}. Room: {schedule.room.room_number}. Time: {schedule.day} {time_str}."
-        }
-        
-        trigger_rag_update(
-            background_tasks, 
-            f"schedule_{schedule.id}", 
-            json.dumps(rag_data), 
-            {
-                "type": "schedule", 
-                "course_code": schedule.section.course.code,
-                "teacher_initial": schedule.section.teacher.initial,
-                "room_number": schedule.room.room_number,
-                "day": schedule.day
-            }
-        )
-    
     return {
-        "message": "Auto-scheduling completed",
-        "extended_labs_scheduled": labs_scheduled,
-        "standard_courses_scheduled": standard_scheduled,
-        "total_scheduled": labs_scheduled + standard_scheduled
+        "message": "Auto-scheduling completed.",
+        "total_scheduled": result.total_scheduled,
+        "total_sections": result.total_sections,
+        "assigned_non_tba": result.assigned_non_tba,
+        "assigned_tba": result.assigned_tba,
+        "unscheduled": result.unscheduled,
+        "quality": {
+            "mean_score": result.quality.mean_score,
+            "min_score": result.quality.min_score,
+            "variance": result.quality.variance,
+            "overall_score": result.quality.overall_score,
+            "teacher_scores": result.quality.teacher_scores
+        },
     }
+
+
 
 @router.get("/schedules", response_model=PaginatedSchedules)
 def read_schedules(

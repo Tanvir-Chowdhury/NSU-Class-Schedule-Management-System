@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
-import { 
-  Clock, 
-  Loader2, 
-  Trash2, 
-  CheckCircle, 
+import {
+  Clock,
+  Loader2,
+  Trash2,
+  CheckCircle,
   AlertCircle,
   Search,
   ArrowUp,
@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Mail,
-  Calendar,
   Play,
   Filter,
   ChevronDown,
@@ -77,7 +76,10 @@ const ManageSchedules = () => {
   const [isRoomDropdownOpen, setIsRoomDropdownOpen] = useState(false);
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const dropdownRef = React.useRef(null);
-  
+
+  // New: scheduler quality metrics returned from backend
+  const [scheduleQuality, setScheduleQuality] = useState(null);
+
   const { token } = useAuth();
 
   // Debounce search query
@@ -121,7 +123,7 @@ const ManageSchedules = () => {
         setSelectedRoom(rooms[0].id);
       }
     }
-  }, [rooms]);
+  }, [rooms, selectedRoom]);
 
   const fetchSections = async () => {
     try {
@@ -130,7 +132,7 @@ const ManageSchedules = () => {
       });
       setSections(res.data);
     } catch (error) {
-      console.error("Failed to fetch sections");
+      console.error("Failed to fetch sections", error);
     }
   };
 
@@ -141,7 +143,7 @@ const ManageSchedules = () => {
       });
       setRooms(res.data.items || []);
     } catch (error) {
-      console.error("Failed to fetch rooms");
+      console.error("Failed to fetch rooms", error);
     }
   };
 
@@ -152,7 +154,7 @@ const ManageSchedules = () => {
       });
       setTeacherAssignments(res.data);
     } catch (error) {
-      console.error("Failed to fetch teacher assignments");
+      console.error("Failed to fetch teacher assignments", error);
     }
   };
 
@@ -179,8 +181,7 @@ const ManageSchedules = () => {
           total: response.data.total,
           total_pages: Math.ceil(response.data.total / prev.limit)
         }));
-        // Clear selection if page changes (optional, but safer for now)
-        setSelectedIds([]); 
+        setSelectedIds([]);
       } else {
         setSchedules([]);
       }
@@ -206,30 +207,55 @@ const ManageSchedules = () => {
     }
   };
 
-  const runAutoSchedule = async () => {
-    setIsRunning(true);
-    setStatus({ type: '', message: '' });
-    try {
-      const response = await axios.post('http://localhost:8000/admin/schedule/auto', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setStatus({ 
-        type: 'success', 
-        message: `Scheduling Complete! Scheduled ${response.data.total_scheduled} classes.` 
-      });
-      fetchSchedules(); // Refresh data
-      fetchAllSchedules(); // Refresh calendar data
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Auto-scheduling failed.' });
-    } finally {
-      setIsRunning(false);
+
+const runAutoSchedule = async () => {
+  setIsRunning(true);
+  setStatus({ type: '', message: '' });
+  setScheduleQuality(null);
+
+  try {
+    const response = await axios.post('http://localhost:8000/admin/schedule/auto', {}, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const q = response.data?.quality || null;
+    setScheduleQuality(q);
+
+    const totalSections = response.data?.total_sections;
+    const assignedNonTba = response.data?.assigned_non_tba;
+    const assignedTba = response.data?.assigned_tba;
+
+    const meanText = q?.mean_score != null ? ` Mean: ${Number(q.mean_score).toFixed(2)}/100.` : '';
+    const varText = q?.variance != null ? ` Variance: ${Number(q.variance).toFixed(2)}.` : '';
+
+    let msg = 'Scheduling Complete!';
+
+    if (
+      Number.isFinite(Number(totalSections)) &&
+      Number.isFinite(Number(assignedNonTba)) &&
+      Number.isFinite(Number(assignedTba))
+    ) {
+      msg += ` Assigned ${Number(assignedNonTba)}/${Number(totalSections)} sections to teachers, ${Number(assignedTba)} to TBA.`;
+    } else {
+      msg += ` Scheduled ${response.data?.total_scheduled ?? 0} classes.`;
     }
-  };
+
+    setStatus({ type: 'success', message: `${msg}${meanText}${varText}` });
+
+    fetchSchedules();
+    fetchAllSchedules();
+    fetchTeacherAssignments();
+  } catch (error) {
+    setStatus({ type: 'error', message: 'Auto-scheduling failed.' });
+  } finally {
+    setIsRunning(false);
+  }
+};
+
 
   const getScheduleForCell = (day, slotId) => {
     if (!selectedRoom) return null;
-    
-    // Helper to check if a schedule matches a specific day
+
     const isDayMatch = (scheduleDay, currentDay) => {
       if (scheduleDay === currentDay) return true;
       if (scheduleDay === 'ST' && (currentDay === 'Sunday' || currentDay === 'Tuesday')) return true;
@@ -238,9 +264,8 @@ const ManageSchedules = () => {
       return false;
     };
 
-    // Use allSchedules instead of paginated schedules
-    const schedule = allSchedules.find(s => 
-      s.room_id === parseInt(selectedRoom) && 
+    const schedule = allSchedules.find(s =>
+      s.room_id === parseInt(selectedRoom) &&
       s.time_slot_id === slotId &&
       isDayMatch(s.day, day)
     );
@@ -248,16 +273,16 @@ const ManageSchedules = () => {
     if (!schedule) return null;
 
     const isExtended = schedule.section.course.duration_mode === 'EXTENDED';
-    
-    const prevSchedule = allSchedules.find(s => 
-      s.room_id === parseInt(selectedRoom) && 
+
+    const prevSchedule = allSchedules.find(s =>
+      s.room_id === parseInt(selectedRoom) &&
       s.time_slot_id === slotId - 1 &&
       s.section_id === schedule.section_id &&
       isDayMatch(s.day, day)
     );
 
     if (prevSchedule && isExtended) {
-      return 'SKIP'; 
+      return 'SKIP';
     }
 
     return { ...schedule, isExtended };
@@ -267,17 +292,17 @@ const ManageSchedules = () => {
     try {
       const response = await axios.get('http://localhost:8000/admin/schedules', {
         headers: { Authorization: `Bearer ${token}` },
-        params: { limit: 10000 } // Fetch all
+        params: { limit: 10000 }
       });
-      const allSchedules = response.data.items || [];
+      const all = response.data.items || [];
 
       const doc = new jsPDF();
       doc.text("Class Schedules", 14, 10);
-      
+
       const tableColumn = ["ID", "Course", "Section", "Teacher", "Room", "Day", "Time"];
       const tableRows = [];
 
-      allSchedules.forEach(schedule => {
+      all.forEach(schedule => {
         const scheduleData = [
           schedule.id,
           schedule.section.course.code,
@@ -307,12 +332,12 @@ const ManageSchedules = () => {
     try {
       const response = await axios.get('http://localhost:8000/admin/schedules', {
         headers: { Authorization: `Bearer ${token}` },
-        params: { limit: 10000 } // Fetch all
+        params: { limit: 10000 }
       });
-      const allSchedules = response.data.items || [];
+      const all = response.data.items || [];
 
       const headers = ["ID,Course,Section,Teacher,Room,Day,Time"];
-      const rows = allSchedules.map(schedule => 
+      const rows = all.map(schedule =>
         `${schedule.id},${schedule.section.course.code},${schedule.section.section_number},${schedule.section.teacher ? schedule.section.teacher.initial : 'TBA'},${schedule.room.room_number},${schedule.day},"${TIME_SLOTS[schedule.time_slot_id]}"`
       );
 
@@ -340,6 +365,7 @@ const ManageSchedules = () => {
       setIsAddModalOpen(false);
       fetchSchedules();
       fetchAllSchedules();
+      fetchTeacherAssignments();
       setNewSchedule({
         section_id: '',
         room_id: '',
@@ -354,7 +380,7 @@ const ManageSchedules = () => {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this schedule entry?')) return;
-    
+
     try {
       await axios.delete(`http://localhost:8000/admin/schedules/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -362,6 +388,7 @@ const ManageSchedules = () => {
       setStatus({ type: 'success', message: 'Schedule deleted successfully.' });
       fetchSchedules();
       fetchAllSchedules();
+      fetchTeacherAssignments();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete schedule.' });
     }
@@ -395,7 +422,7 @@ const ManageSchedules = () => {
     if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} schedule entries?`)) return;
 
     try {
-      await axios.post('http://localhost:8000/admin/schedules/bulk-delete', 
+      await axios.post('http://localhost:8000/admin/schedules/bulk-delete',
         { ids: selectedIds },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -403,6 +430,7 @@ const ManageSchedules = () => {
       setSelectedIds([]);
       fetchSchedules();
       fetchAllSchedules();
+      fetchTeacherAssignments();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete selected schedules.' });
     }
@@ -416,8 +444,10 @@ const ManageSchedules = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setStatus({ type: 'success', message: 'All schedules deleted successfully.' });
+      setScheduleQuality(null);
       fetchSchedules();
       fetchAllSchedules();
+      fetchTeacherAssignments();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete all schedules.' });
     }
@@ -429,6 +459,85 @@ const ManageSchedules = () => {
     }
   };
 
+  const renderQuality = () => {
+    if (!scheduleQuality) return null;
+
+    const meanScore = scheduleQuality.mean_score != null ? Number(scheduleQuality.mean_score) : null;
+    const minScore = scheduleQuality.min_score != null ? Number(scheduleQuality.min_score) : null;
+    const variance = scheduleQuality.variance != null ? Number(scheduleQuality.variance) : null;
+    const overall = scheduleQuality.overall_score != null ? Number(scheduleQuality.overall_score) : null;
+
+    const teacherScores = Array.isArray(scheduleQuality.teacher_scores) ? scheduleQuality.teacher_scores : [];
+
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Auto-Scheduler Quality Metrics</h2>
+            <p className="text-sm text-slate-500">Preference satisfaction + fairness summary.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+            <div className="text-slate-500 text-xs">Mean</div>
+            <div className="font-bold text-slate-900 text-lg">{meanScore == null ? '—' : `${meanScore.toFixed(2)}/100`}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+            <div className="text-slate-500 text-xs">Min</div>
+            <div className="font-bold text-slate-900 text-lg">{minScore == null ? '—' : `${minScore.toFixed(2)}/100`}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+            <div className="text-slate-500 text-xs">Variance</div>
+            <div className="font-bold text-slate-900 text-lg">{variance == null ? '—' : variance.toFixed(2)}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+            <div className="text-slate-500 text-xs">Overall</div>
+            <div className="font-bold text-slate-900 text-lg">{overall == null ? '—' : `${overall.toFixed(2)}/100`}</div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left border border-slate-200 rounded-lg overflow-hidden">
+            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Initial</th>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3 text-center">Assigned Sections</th>
+                <th className="px-4 py-3 text-center">Satisfaction</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {teacherScores.length === 0 ? (
+                <tr>
+                  <td colSpan="4" className="px-4 py-5 text-center text-slate-500">
+                    No teacher satisfaction data returned.
+                  </td>
+                </tr>
+              ) : (
+                teacherScores
+                  .slice()
+                  .sort((a, b) => Number(b.score_out_of_100 ?? 0) - Number(a.score_out_of_100 ?? 0))
+                  .map((t) => (
+                    <tr key={t.teacher_id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-medium text-slate-900">{t.initial || '—'}</td>
+                      <td className="px-4 py-3 text-slate-700">{t.name || '—'}</td>
+                      <td className="px-4 py-3 text-center text-slate-700">{t.assigned_sections ?? 0}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                          {t.score_out_of_100 == null ? '—' : `${Number(t.score_out_of_100).toFixed(2)}/100`}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -436,7 +545,7 @@ const ManageSchedules = () => {
           <h1 className="text-2xl font-bold text-slate-900">Manage Schedules</h1>
           <p className="text-slate-500">View and manage individual class schedule entries.</p>
         </div>
-        
+
         <div className="flex flex-wrap gap-2">
           <button
             onClick={runAutoSchedule}
@@ -488,12 +597,17 @@ const ManageSchedules = () => {
 
       {status.message && (
         <div className={`p-4 rounded-lg flex items-center gap-3 ${
-          status.type === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'
+          status.type === 'success'
+            ? 'bg-green-50 text-green-700 border border-green-100'
+            : 'bg-red-50 text-red-700 border border-red-100'
         }`}>
           {status.type === 'success' ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
           {status.message}
         </div>
       )}
+
+      {/* New: Quality Panel */}
+      {renderQuality()}
 
       {/* Calendar View Section */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
@@ -502,14 +616,14 @@ const ManageSchedules = () => {
             <Filter className="h-5 w-5" />
             <span className="font-medium">Filter by Room:</span>
           </div>
-          
+
           <div className="relative min-w-[250px]" ref={dropdownRef}>
-            <button 
+            <button
               onClick={() => setIsRoomDropdownOpen(!isRoomDropdownOpen)}
               className="w-full px-3 py-2 text-left border border-slate-300 rounded-lg flex items-center justify-between bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
             >
               <span className="truncate">
-                {selectedRoom 
+                {selectedRoom
                   ? (() => {
                       const r = rooms.find(r => r.id == selectedRoom);
                       return r ? `${r.room_number} (${r.type})` : 'Select Room';
@@ -538,9 +652,7 @@ const ManageSchedules = () => {
                 </div>
                 <div className="overflow-y-auto flex-1">
                   {rooms
-                    .filter(room => 
-                      room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase())
-                    )
+                    .filter(room => room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase()))
                     .map(room => (
                       <button
                         key={room.id}
@@ -557,9 +669,9 @@ const ManageSchedules = () => {
                         {parseInt(selectedRoom) === room.id && <Check className="h-4 w-4" />}
                       </button>
                     ))}
-                    {rooms.filter(room => room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase())).length === 0 && (
-                      <div className="px-4 py-3 text-sm text-slate-500 text-center">No rooms found</div>
-                    )}
+                  {rooms.filter(room => room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase())).length === 0 && (
+                    <div className="px-4 py-3 text-sm text-slate-500 text-center">No rooms found</div>
+                  )}
                 </div>
               </div>
             )}
@@ -574,8 +686,8 @@ const ManageSchedules = () => {
                   Time Slot
                 </th>
                 {DAYS.map((day, index) => (
-                  <th 
-                    key={day} 
+                  <th
+                    key={day}
                     className={`p-3 border border-slate-200 font-semibold w-32 ${
                       day === 'Friday' ? 'bg-slate-100 text-slate-400' : 'bg-slate-50 text-slate-700'
                     }`}
@@ -594,12 +706,12 @@ const ManageSchedules = () => {
                   </td>
                   {DAYS.map((day) => {
                     const scheduleData = getScheduleForCell(day, slot.id);
-                    
+
                     if (scheduleData === 'SKIP') return null;
 
                     return (
-                      <td 
-                        key={day} 
+                      <td
+                        key={day}
                         rowSpan={scheduleData?.isExtended ? 2 : 1}
                         className={`p-2 border border-slate-200 align-top h-24 ${
                           day === 'Friday' ? 'bg-slate-100/50' : ''
@@ -607,8 +719,8 @@ const ManageSchedules = () => {
                       >
                         {scheduleData && (
                           <div className={`p-2 rounded-lg border text-xs h-full flex flex-col justify-between ${
-                            scheduleData.section.course.type === 'LAB' 
-                              ? 'bg-purple-50 border-purple-100 text-purple-700' 
+                            scheduleData.section.course.type === 'LAB'
+                              ? 'bg-purple-50 border-purple-100 text-purple-700'
                               : 'bg-blue-50 border-blue-100 text-blue-700'
                           }`}>
                             <div>
@@ -718,10 +830,10 @@ const ManageSchedules = () => {
                 <tr>
                   <td colSpan="9" className="px-6 py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center">
-                        <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
-                            <Clock className="h-6 w-6 text-slate-400" />
-                        </div>
-                        <p className="font-medium text-slate-900">No schedules found</p>
+                      <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                        <Clock className="h-6 w-6 text-slate-400" />
+                      </div>
+                      <p className="font-medium text-slate-900">No schedules found</p>
                     </div>
                   </td>
                 </tr>
@@ -778,7 +890,6 @@ const ManageSchedules = () => {
           </table>
         </div>
 
-        {/* Pagination Footer */}
         <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
           <div className="text-sm text-slate-500">
             Showing <span className="font-medium">{schedules.length > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0}</span> to <span className="font-medium">{Math.min(pagination.page * pagination.limit, pagination.total)}</span> of <span className="font-medium">{pagination.total}</span> results
@@ -807,52 +918,56 @@ const ManageSchedules = () => {
 
       {/* Teacher Assignment Overview */}
       <div className="mt-8">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Teacher Assignment Overview</h2>
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                      <tr>
-                          <th className="px-6 py-4">Initial</th>
-                          <th className="px-6 py-4">Name</th>
-                          <th className="px-6 py-4 text-center">Assigned Sections</th>
-                          <th className="px-6 py-4 text-center">Status</th>
-                          <th className="px-6 py-4 text-center">Contact</th>
-                      </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                      {teacherAssignments.map(teacher => (
-                          <tr key={teacher.id} className="hover:bg-slate-50/50">
-                              <td className="px-6 py-4 font-medium">{teacher.initial}</td>
-                              <td className="px-6 py-4">{teacher.name}</td>
-                              <td className="px-6 py-4 text-center">{teacher.assigned_sections}</td>
-                              <td className="px-6 py-4 text-center">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                      teacher.status === 'Assigned' 
-                                      ? 'bg-green-100 text-green-800' 
-                                      : 'bg-yellow-100 text-yellow-800'
-                                  }`}>
-                                      {teacher.status}
-                                  </span>
-                              </td>
-                              <td className="px-6 py-4 text-center">
-                                  {teacher.status === 'Unassigned' && (
-                                      <a href={`mailto:${teacher.contact_details || ''}`} className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" title="Contact Teacher">
-                                          <Mail className="h-4 w-4" />
-                                      </a>
-                                  )}
-                              </td>
-                          </tr>
-                      ))}
-                      {teacherAssignments.length === 0 && (
-                          <tr>
-                              <td colSpan="5" className="px-6 py-8 text-center text-slate-500">
-                                  No teacher data available.
-                              </td>
-                          </tr>
-                      )}
-                  </tbody>
-              </table>
-          </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-4">Teacher Assignment Overview</h2>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+              <tr>
+                <th className="px-6 py-4">Initial</th>
+                <th className="px-6 py-4">Name</th>
+                <th className="px-6 py-4 text-center">Assigned Sections</th>
+                <th className="px-6 py-4 text-center">Status</th>
+                <th className="px-6 py-4 text-center">Contact</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {teacherAssignments.map(teacher => (
+                <tr key={teacher.id} className="hover:bg-slate-50/50">
+                  <td className="px-6 py-4 font-medium">{teacher.initial}</td>
+                  <td className="px-6 py-4">{teacher.name}</td>
+                  <td className="px-6 py-4 text-center">{teacher.assigned_sections}</td>
+                  <td className="px-6 py-4 text-center">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      teacher.status === 'Assigned'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {teacher.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    {teacher.status === 'Unassigned' && (
+                      <a
+                        href={`mailto:${teacher.contact_details || ''}`}
+                        className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                        title="Contact Teacher"
+                      >
+                        <Mail className="h-4 w-4" />
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {teacherAssignments.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="px-6 py-8 text-center text-slate-500">
+                    No teacher data available.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Add Schedule Modal */}
@@ -861,14 +976,14 @@ const ManageSchedules = () => {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="font-bold text-lg text-slate-800">Add New Schedule</h3>
-              <button 
+              <button
                 onClick={() => setIsAddModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600 transition-colors"
               >
                 &times;
               </button>
             </div>
-            
+
             <form onSubmit={handleAddSchedule} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Section</label>
@@ -876,7 +991,7 @@ const ManageSchedules = () => {
                   required
                   className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                   value={newSchedule.section_id}
-                  onChange={(e) => setNewSchedule({...newSchedule, section_id: e.target.value})}
+                  onChange={(e) => setNewSchedule({ ...newSchedule, section_id: e.target.value })}
                 >
                   <option value="">Select Section</option>
                   {sections.map(section => (
@@ -893,7 +1008,7 @@ const ManageSchedules = () => {
                   required
                   className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                   value={newSchedule.room_id}
-                  onChange={(e) => setNewSchedule({...newSchedule, room_id: e.target.value})}
+                  onChange={(e) => setNewSchedule({ ...newSchedule, room_id: e.target.value })}
                 >
                   <option value="">Select Room</option>
                   {rooms.map(room => (
@@ -911,7 +1026,7 @@ const ManageSchedules = () => {
                     required
                     className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                     value={newSchedule.day}
-                    onChange={(e) => setNewSchedule({...newSchedule, day: e.target.value})}
+                    onChange={(e) => setNewSchedule({ ...newSchedule, day: e.target.value })}
                   >
                     <option value="ST">ST (Sun/Tue)</option>
                     <option value="MW">MW (Mon/Wed)</option>
@@ -932,7 +1047,7 @@ const ManageSchedules = () => {
                     required
                     className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                     value={newSchedule.time_slot_id}
-                    onChange={(e) => setNewSchedule({...newSchedule, time_slot_id: parseInt(e.target.value)})}
+                    onChange={(e) => setNewSchedule({ ...newSchedule, time_slot_id: parseInt(e.target.value) })}
                   >
                     {Object.entries(TIME_SLOTS).map(([id, time]) => (
                       <option key={id} value={id}>{time}</option>
@@ -947,7 +1062,7 @@ const ManageSchedules = () => {
                   id="is_friday"
                   className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   checked={newSchedule.is_friday_booking}
-                  onChange={(e) => setNewSchedule({...newSchedule, is_friday_booking: e.target.checked})}
+                  onChange={(e) => setNewSchedule({ ...newSchedule, is_friday_booking: e.target.checked })}
                 />
                 <label htmlFor="is_friday" className="text-sm text-slate-700">Is Friday Booking?</label>
               </div>

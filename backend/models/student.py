@@ -32,5 +32,5 @@ class Enrollment(Base):
     section_id = Column(Integer, ForeignKey("sections.id"), nullable=False)
     
     student = relationship("Student", back_populates="enrollments")
-    section = relationship("Section")
+    section = relationship("Section", back_populates="enrollments")
 

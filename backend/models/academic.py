@@ -51,7 +51,7 @@ class Course(Base):
     type = Column(Enum(ClassType), nullable=False)
     duration_mode = Column(Enum(DurationMode), default=DurationMode.STANDARD, nullable=False)
 
-    sections = relationship("Section", back_populates="course")
+    sections = relationship("Section", back_populates="course", cascade="all, delete-orphan")
 
     @property
     def sections_count(self):

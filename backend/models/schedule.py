@@ -16,7 +16,8 @@ class Section(Base):
 
     course = relationship("Course", back_populates="sections")
     teacher = relationship("Teacher")
-    schedules = relationship("ClassSchedule", back_populates="section")
+    schedules = relationship("ClassSchedule", back_populates="section", cascade="all, delete-orphan")
+    enrollments = relationship("Enrollment", back_populates="section", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint('course_id', 'section_number', name='unique_course_section'),
