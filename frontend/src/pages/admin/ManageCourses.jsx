@@ -18,8 +18,11 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const ManageCourses = () => {
   const [courses, setCourses] = useState([]);
@@ -51,6 +54,71 @@ const ManageCourses = () => {
   useEffect(() => {
     fetchCourses(1, sortConfig, searchQuery);
   }, [sortConfig, searchQuery]);
+
+  const downloadPDF = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/courses', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allCourses = response.data.items || [];
+
+      const doc = new jsPDF();
+      doc.text("Courses List", 14, 10);
+      
+      const tableColumn = ["Code", "Title", "Credits", "Type", "Duration"];
+      const tableRows = [];
+
+      allCourses.forEach(course => {
+        const courseData = [
+          course.code,
+          course.title,
+          course.credits,
+          course.type,
+          course.duration_mode
+        ];
+        tableRows.push(courseData);
+      });
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 20,
+      });
+
+      doc.save("courses.pdf");
+    } catch (error) {
+      console.error("Failed to download PDF", error);
+      setStatus({ type: 'error', message: 'Failed to download PDF.' });
+    }
+  };
+
+  const downloadCSV = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/courses', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allCourses = response.data.items || [];
+
+      const headers = ["Code,Title,Credits,Type,Duration"];
+      const rows = allCourses.map(course => 
+        `${course.code},"${course.title}",${course.credits},${course.type},${course.duration_mode}`
+      );
+
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "courses.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Failed to download CSV", error);
+      setStatus({ type: 'error', message: 'Failed to download CSV.' });
+    }
+  };
 
   const fetchCourses = async (page = 1, currentSort = sortConfig, currentSearch = searchQuery) => {
     try {
@@ -237,6 +305,20 @@ const ManageCourses = () => {
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Course
+          </button>
+          <button
+            onClick={downloadPDF}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            PDF
+          </button>
+          <button
+            onClick={downloadCSV}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            CSV
           </button>
           <input
             type="file"

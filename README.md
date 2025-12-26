@@ -3,29 +3,53 @@
 ## Project Overview
 This project is a Class Schedule Management System designed to help manage and organize academic schedules. It leverages a modern tech stack including AI capabilities for enhanced functionality.
 
-## Latest Updates (Dec 27, 2025)
-- **Student Features:**
-    - **Course Planner:** Students can now **drop/remove** courses from their planner directly via the UI.
-- **AI & Chatbot Enhancements:**
-    - **Rich Text Support:** The Chatbot now renders **Markdown tables, lists, and formatted text** for better readability.
-    - **RAG Expansion:** Implemented a **bulk indexing service** to feed all Rooms, Teachers, Courses, and Schedules into the Pinecone vector database for smarter AI responses.
-    - **Admin Control:** Added a "Reindex RAG" endpoint for Admins to manually trigger a knowledge base update.
-- **Bug Fixes:**
-    - **Admin Deletion:** Fixed an `IntegrityError` when deleting Admin accounts by ensuring the profile is deleted before the user record.
+## Key Features
 
-## Latest Updates (Dec 26, 2025)
-- **Auto Scheduler Enhancements:**
-    - **Teacher Preferences:** The scheduler now prioritizes teacher timing preferences. If a teacher prefers a specific time slot, the system attempts to assign their sections to that slot first.
-    - **Fallback Logic:** If preferred slots are unavailable, the system falls back to random assignment.
-    - **Teacher Assignment:** Teachers are assigned to sections based on their course preferences *before* room scheduling begins.
-- **Database Updates:**
-    - **Dummy Data Script:** Added `backend/add_dummy_data.py` to populate the database with random faculty types (Permanent/Adjunct) and course preferences for testing.
-    - **Faculty Types:** Restricted to 'Permanent' and 'Adjunct' only.
-- **UI Improvements:**
-    - **Calendar View:** Added date headers to the Day view for better clarity.
-    - **Chat Widget:** Implemented a floating AI Chat Assistant (`src/components/ChatWidget.jsx`) available on all portal pages. It supports quick actions like "Plan my courses" and "Find empty labs".
-    - **Booking Management:** Users can now delete their own booking requests (if the time hasn't passed).
-    - **Admin Schedules:** Added a "Teacher Assignment Overview" table to track assigned vs. unassigned faculty.
+### 1. Intelligent Auto-Scheduling
+The core of the system is a sophisticated auto-scheduling algorithm that optimizes resource allocation:
+- **Floor-Level Prioritization:** Automatically fills lower-floor rooms (e.g., 200-level) before moving to higher floors to ensure efficient building utilization.
+- **Department-Specific Allocation:** Intelligently assigns ECE courses to SAC rooms and other departments to NAC rooms.
+- **Teacher Preference Integration:** Prioritizes teacher's preferred time slots and ensures they are assigned to the courses they requested.
+- **Lab/Theory Consistency:** Guarantees that if a teacher is assigned a Theory section, they are also linked to the corresponding Lab section.
+- **Conflict Resolution:** Automatically handles "TBA" assignments for unassigned sections and falls back to random valid slots if preferences cannot be met.
+
+### 2. Comprehensive Admin Management
+- **Unified Scheduling Interface:** A consolidated "Manage Schedules" page that offers:
+    - **Auto-Schedule Trigger:** Run the complex scheduling algorithm with one click.
+    - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules, supporting complex day patterns (ST, MW, RA).
+    - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules (downloads complete datasets).
+- **Preference Management:**
+    - **Approval Workflow:** Teachers submit preferences which enter a "Pending" state. Admins can review, accept, or reject them individually or in bulk. Only accepted preferences are fed into the auto-scheduler.
+- **Resource Management:** Full CRUD capabilities for Rooms, Courses, and Teachers with bulk upload (CSV) and bulk delete options.
+- **Teacher Assignment Overview:** Real-time tracking of faculty assignments and workload.
+
+### 3. AI-Powered Assistant (RAG)
+- **Context-Aware Chatbot:** A floating AI assistant available throughout the portal that answers queries about schedules, rules, and user data.
+- **Real-Time Synchronization:** Any change in the database (Create/Update/Delete) is instantly reflected in the Pinecone vector database.
+- **Optimized Data Structure:** All data is stored as structured JSON objects in the vector database, enabling the AI to parse and understand complex relationships (e.g., Teacher-Course-Room mappings) more effectively.
+- **Enhanced Teacher Profiles:** The vector database now indexes comprehensive teacher profiles, including email, faculty type, research interests, and published papers, allowing for rich queries like "Who specializes in AI?".
+- **Office Hours & Bookings:** The AI now has access to teacher office hours and room booking requests, enabling it to answer questions like "When is Professor X available?" or "What is the status of my room booking?".
+- **Performance Optimization:** Implemented bulk indexing strategies to handle large datasets efficiently, ensuring rapid system resets and updates.
+- **Asynchronous Processing:** Vectorization and database upserts are handled in background tasks, ensuring that the user interface remains responsive during heavy data operations.
+- **Privacy Filters:** Automatically redacts sensitive information (like CGPA) based on the user's role.
+
+### 4. Student & Teacher Portals
+- **Student Features:**
+    - **Course Planner:** Interactive tool to plan semesters, check for conflicts, and manage course loads.
+    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing enrolled courses with time slots, room numbers, and day patterns.
+- **Teacher Features:**
+    - **Dashboard:** Overview of assigned courses, total credits (calculated across all assigned sections), and office hours.
+    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing assigned classes.
+    - **Profile Management:** Manage research interests, office hours, and public profile details.
+    - **Faculty Types:** Support for Permanent (12 credits min) and Adjunct (3 credits min) faculty roles.
+
+### 5. Google Calendar Integration
+- **Seamless Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
+- **Smart Event Creation:**
+    - **Recurring Events:** Classes are synced as weekly recurring events for the full semester duration (14 weeks).
+    - **Accurate Timing:** Logic correctly handles day patterns (e.g., ST, MW) to ensure events appear on the correct days of the week.
+    - **Room Bookings:** Approved one-time room bookings are also synced.
+    - **OAuth 2.0:** Secure connection using standard Google authentication.
 
 ## Tech Stack
 - **Backend:** FastAPI (Python)
@@ -34,6 +58,46 @@ This project is a Class Schedule Management System designed to help manage and o
 - **LLM:** Mistral AI
 - **Frontend:** React with Tailwind CSS
 
+## Auto Scheduler Architecture
+The system features an intelligent Auto Scheduler (`backend/services/scheduler.py`) that automates the complex task of assigning teachers to sections and scheduling classes into rooms and time slots.
+
+### Algorithm Overview
+1.  **Teacher Assignment Phase:**
+    *   **Input:** `TeacherPreference` records (Course, Number of Sections).
+    *   **Process:** The system iterates through accepted teacher preferences and assigns teachers to unassigned sections of the requested courses.
+    *   **Goal:** Ensure faculty members are assigned to the courses they requested, respecting their section limits.
+    *   **TBA Handling:** Any sections remaining unassigned after this phase are linked to a placeholder "TBA" teacher to ensure they are still scheduled.
+
+2.  **Initialization Phase:**
+    *   **Schedule Matrix:** A 3D matrix (Room x Day x TimeSlot) is initialized to track room availability.
+    *   **Teacher Matrix:** A similar structure tracks teacher availability to prevent double-booking.
+    *   **Existing Schedules:** Any pre-existing schedules are loaded into the matrices to ensure new schedules don't conflict.
+
+3.  **Lab Scheduling Phase (Priority):**
+    *   **Why First?** Labs require specific room types (`LAB`) and longer durations (`EXTENDED` mode, typically 2 consecutive slots), making them harder to fit.
+    *   **Process:**
+        *   Iterate through all sections with `EXTENDED` duration mode.
+        *   Filter for rooms of type `LAB`.
+        *   **Department Logic:** ECE labs are prioritized for SAC building rooms.
+        *   **Optimization:** Sort rooms by floor level (ascending) to fill lower floors (e.g., 200-level) first.
+        *   **Teacher Preferences:** Check if the assigned teacher has a specific timing preference (`TeacherTimingPreference`). Try to schedule in that slot first.
+        *   **Conflict Check:** Ensure the room is free, the teacher is free, and the slot is valid for extended duration.
+        *   **Fallback:** If preferred slots are full, try other available slots.
+
+4.  **Theory Scheduling Phase:**
+    *   **Process:**
+        *   Iterate through all sections with `STANDARD` duration mode.
+        *   Filter for rooms of type `THEORY`.
+        *   **Department Logic:** ECE courses are prioritized for SAC rooms; others for NAC.
+        *   **Optimization:** Sort rooms by floor level (ascending) to fill lower floors first.
+        *   **Pattern Matching:** Theory courses follow specific day patterns (e.g., ST = Sunday/Tuesday, MW = Monday/Wednesday).
+        *   **Teacher Preferences:** Prioritize teacher's preferred time slots.
+        *   **Conflict Check:** Ensure the room is free and the teacher is free on *both* days of the pattern.
+        *   **Assignment:** Lock the room and teacher for the selected time slot on both days.
+
+5.  **Result:**
+    *   A conflict-free schedule where rooms are utilized efficiently, teachers are assigned based on preference, and course requirements (Lab vs Theory) are met.
+
 ## Frontend Architecture
 ### Components
 - **Chat Widget (`src/components/ChatWidget.jsx`):**
@@ -41,6 +105,11 @@ This project is a Class Schedule Management System designed to help manage and o
     - **Context Aware:** Only visible to logged-in users.
     - **Rich Formatting:** Uses `react-markdown` and `remark-gfm` to render tables, lists, and bold text.
     - **Features:** Quick chips for common queries, typing indicators, and integration with the RAG-powered backend.
+- **Calendar View (`src/components/CalendarView.jsx`):**
+    - **Custom Grid Layout:** A specialized table view that renders the weekly schedule.
+    - **Time Slot Mapping:** Rows correspond to standard university time slots (1-7), and columns represent days (Sunday-Saturday).
+    - **Smart Rendering:** Handles complex day patterns (e.g., a class on "ST" appears on both Sunday and Tuesday) and extended lab sessions (spanning multiple rows).
+    - **Role-Based Display:** Used by both Students and Teachers to view their respective schedules.
 - **Navbar (`src/components/Navbar.jsx`):**
     - **Dynamic Authentication State:**
         - **Logged Out:** Shows "Login" and "Register" buttons.
@@ -66,6 +135,12 @@ This project is a Class Schedule Management System designed to help manage and o
         - **Booking Request:** Users can submit a booking request with a reason.
         - **My Requests:** Users can view the status of their submitted requests in a tabular format.
         - **Pending Logic:** Pending requests block the room from being booked by others until resolved by an Admin.
+- **Public Pages:**
+    - **Faculty Members (`src/pages/Teachers.jsx`):**
+        - **Public Directory:** A searchable and filterable list of all faculty members.
+        - **Advanced Filtering:** Users can filter by Department and Faculty Type (Permanent/Adjunct).
+        - **Search:** Real-time search by Name or Initial.
+        - **Detailed Profiles:** Clicking on a teacher opens a detailed view with their research interests, publications, and contact info.
 - **Public Pages:**
     - **Home (`src/pages/Home.jsx`):**
         - **Landing Page:** The main entry point for all users with enhanced UI (deep shadows, glassmorphism).
@@ -441,9 +516,10 @@ MISTRAL_API_KEY=your_mistral_api_key
         - `GET /profile/public/teacher/{id}`: Get public Teacher profile (No auth required).
         - `POST /profile/upload-picture`: Upload profile picture (All users).
         - **RAG Pipeline:**
-            - Updates trigger a background task.
-            - Generates embeddings using Mistral.
-            - Upserts data to Pinecone with metadata (`user_id`, `role`).
+            - **Trigger:** Updates are triggered automatically on CRUD operations.
+            - **Execution:** Runs asynchronously as a FastAPI Background Task to prevent blocking.
+            - **Data Format:** Converts entity objects (Rooms, Teachers, etc.) into structured JSON strings before embedding.
+            - **Process:** Generates embeddings using Mistral and upserts to Pinecone with rich metadata.
     - **AI Chat:**
         - `POST /chat/message`: Send a message to the AI Assistant.
             - **Body:** `{"query": "your question here"}`
@@ -454,80 +530,3 @@ MISTRAL_API_KEY=your_mistral_api_key
         - `PUT /settings/current_semester`: Update the current semester value (Admin only).
 - **GET /**: Root endpoint to verify the backend is running.
 
-## Changelog (December 2025)
-- **UI Overhaul:**
-    - **Student Settings:** Completely redesigned with a modern gradient theme, profile cards, and improved form layouts.
-    - **Teacher Settings:** Updated to match the new modern design language.
-    - **Dashboard:** Student dashboard now displays real-time CGPA data fetched from the database.
-    - **Navbar:** Added dynamic "Open Portal" button for logged-in users, replacing Login/Register links.
-- **New Features:**
-    - **Teacher Profiles:**
-        - **Edit Profile:** Teachers can now manage their academic profile including Published Papers, Research Interests, Projects, Contact Details, and Office Hours via a dedicated page.
-        - **Faculty Type:** Teachers can set their status as **Permanent** or **Adjunct** in the Edit Profile page.
-        - **Preferences:** New page for teachers to select preferred courses and section counts, with validation based on Faculty Type (12 credits for Permanent, 3 for Adjunct).
-        - **Public Profile:** Added a public-facing profile page for teachers (`/teacher/profile/:id`) accessible without login.
-    - **Account Deletion:** Students can now permanently delete their accounts via the "Danger Zone" in settings. Requires confirmation.
-- **Database & Backend:**
-    - **Schema Updates:** Added `faculty_type` to `teachers` table and created `teacher_preferences` table.
-    - **Schema Cleanup:** Removed `course_history` column from the `students` table and related API endpoints.
-    - **Profile API:** Enhanced `DELETE /profile/student` endpoint for secure account removal.
-    - **Scheduler Logic:** Updated to support day patterns (ST, MW, RA) for standard courses.
-    - **Availability:** Added `availability` column to `ClassSchedule` table for easier querying.
-    - **Email Service:** Implemented basic email service for admin notifications.
-## Teacher Preferences Workflow Updates
-
-### Backend Changes
-- **`POST /profile/teacher/preferences`**: Now deletes **ALL** existing preferences for the teacher before saving the new ones. This ensures that if a teacher removes a course from their list, it is actually removed from the database. It also resets the status of all preferences to `pending` upon re-submission.
-- **`POST /admin/preferences/reject-all`**: Now **deletes** all pending preferences from the database instead of just marking them as 'rejected'. This forces teachers to re-submit their choices.
-- **`POST /admin/preferences/reject/{id}`**: Now **deletes** the specific preference request instead of marking it as 'rejected'.
-
-### Frontend Changes
-- **Teacher Portal (`Preferences.jsx`)**:
-  - `handleSave` now updates the local state with the response from the server, ensuring the UI immediately reflects the new `pending` status.
-  - `getStatusNote` logic updated to check if *any* preference is accepted or pending, rather than just checking the first one.
-
-### Behavior
-1. **Teacher Submits**: Old preferences are wiped. New ones are saved as `pending`.
-2. **Admin Rejects**: The preference record is deleted. The teacher sees their list is empty (or missing that course) and must add it again.
-3. **Admin Accepts**: The preference status becomes `accepted`.
-
----
-**Updated as of Dec 25, 2025.**
-
-
-## Teacher Preferences Approval Workflow
-
-### Features
-- Teachers submit course preferences (saved as requests with status 'pending').
-- Admins see all requests in a new "Manage Preferences" page, with options to accept/reject all or individually.
-- Teachers see the status of their preferences (Acceptance Pending, Accepted, Rejected).
-- Only accepted preferences are used for auto-scheduling.
-
-### Backend
-- Added `status` column to `TeacherPreference` (pending, accepted, rejected).
-- New endpoints in `api/admin_preferences.py`:
-  - `GET /admin/preferences/requests`: List all pending requests.
-  - `POST /admin/preferences/accept-all`: Accept all pending requests.
-  - `POST /admin/preferences/reject-all`: Reject all pending requests.
-  - `POST /admin/preferences/accept/{pref_id}`: Accept individual request.
-  - `POST /admin/preferences/reject/{pref_id}`: Reject individual request.
-- Teacher preference POST endpoint now saves as 'pending' and does not overwrite accepted ones.
-
-### Frontend
-- **Admin Portal:**
-  - New page: `src/pages/admin/ManagePreferences.jsx` with tabular view, bulk and individual accept/reject buttons.
-- **Teacher Portal:**
-  - Preferences page shows status note (Acceptance Pending, Accepted, Rejected).
-
-### Database
-- Migration script: `add_status_column.py` adds `status` column to `teacher_preferences` table.
-
-### Usage
-- Teachers submit preferences as usual.
-- Admins review and approve/reject requests in the Manage Preferences page.
-- Teachers see the status of their requests.
-- Only accepted preferences are used for scheduling.
-
----
-
-**All code and endpoints are updated as of Dec 25, 2025.**

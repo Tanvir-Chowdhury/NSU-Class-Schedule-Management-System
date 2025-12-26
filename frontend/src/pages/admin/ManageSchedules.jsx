@@ -12,8 +12,16 @@ import {
   ArrowDown,
   ChevronLeft,
   ChevronRight,
-  Mail
+  Mail,
+  Calendar,
+  Play,
+  Filter,
+  ChevronDown,
+  Check,
+  Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const TIME_SLOTS = {
   1: "08:00 AM - 09:30 AM",
@@ -25,8 +33,21 @@ const TIME_SLOTS = {
   7: "06:00 PM - 07:30 PM"
 };
 
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_LABELS = ['S', 'M', 'T', 'W', 'R', 'F', 'A'];
+const CALENDAR_TIME_SLOTS = [
+  { id: 1, label: '08:00 AM - 09:30 AM' },
+  { id: 2, label: '09:40 AM - 11:10 AM' },
+  { id: 3, label: '11:20 AM - 12:50 PM' },
+  { id: 4, label: '01:00 PM - 02:30 PM' },
+  { id: 5, label: '02:40 PM - 04:10 PM' },
+  { id: 6, label: '04:20 PM - 05:50 PM' },
+  { id: 7, label: '06:00 PM - 07:30 PM' },
+];
+
 const ManageSchedules = () => {
   const [schedules, setSchedules] = useState([]);
+  const [allSchedules, setAllSchedules] = useState([]); // For Calendar View
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,6 +70,13 @@ const ManageSchedules = () => {
     time_slot_id: 1,
     is_friday_booking: false
   });
+
+  // Auto-Scheduler & Calendar View State
+  const [isRunning, setIsRunning] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState('');
+  const [isRoomDropdownOpen, setIsRoomDropdownOpen] = useState(false);
+  const [roomSearchQuery, setRoomSearchQuery] = useState('');
+  const dropdownRef = React.useRef(null);
   
   const { token } = useAuth();
 
@@ -64,12 +92,36 @@ const ManageSchedules = () => {
   }, [searchQuery]);
 
   useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsRoomDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
     fetchSchedules();
+    fetchAllSchedules(); // Fetch all for calendar
     fetchTeacherAssignments();
     fetchSections();
     fetchRooms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.page, debouncedSearchQuery, sortConfig]);
+
+  // Set initial selected room when rooms are loaded
+  useEffect(() => {
+    if (rooms.length > 0 && !selectedRoom) {
+      const defaultRoom = rooms.find(r => r.room_number === 'SAC201');
+      if (defaultRoom) {
+        setSelectedRoom(defaultRoom.id);
+      } else {
+        setSelectedRoom(rooms[0].id);
+      }
+    }
+  }, [rooms]);
 
   const fetchSections = async () => {
     try {
@@ -140,6 +192,144 @@ const ManageSchedules = () => {
     }
   };
 
+  const fetchAllSchedules = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/schedules', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 } // Fetch all for calendar
+      });
+      if (response.data && Array.isArray(response.data.items)) {
+        setAllSchedules(response.data.items);
+      }
+    } catch (error) {
+      console.error('Failed to fetch all schedules for calendar', error);
+    }
+  };
+
+  const runAutoSchedule = async () => {
+    setIsRunning(true);
+    setStatus({ type: '', message: '' });
+    try {
+      const response = await axios.post('http://localhost:8000/admin/schedule/auto', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setStatus({ 
+        type: 'success', 
+        message: `Scheduling Complete! Scheduled ${response.data.total_scheduled} classes.` 
+      });
+      fetchSchedules(); // Refresh data
+      fetchAllSchedules(); // Refresh calendar data
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Auto-scheduling failed.' });
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const getScheduleForCell = (day, slotId) => {
+    if (!selectedRoom) return null;
+    
+    // Helper to check if a schedule matches a specific day
+    const isDayMatch = (scheduleDay, currentDay) => {
+      if (scheduleDay === currentDay) return true;
+      if (scheduleDay === 'ST' && (currentDay === 'Sunday' || currentDay === 'Tuesday')) return true;
+      if (scheduleDay === 'MW' && (currentDay === 'Monday' || currentDay === 'Wednesday')) return true;
+      if (scheduleDay === 'RA' && (currentDay === 'Thursday' || currentDay === 'Saturday')) return true;
+      return false;
+    };
+
+    // Use allSchedules instead of paginated schedules
+    const schedule = allSchedules.find(s => 
+      s.room_id === parseInt(selectedRoom) && 
+      s.time_slot_id === slotId &&
+      isDayMatch(s.day, day)
+    );
+
+    if (!schedule) return null;
+
+    const isExtended = schedule.section.course.duration_mode === 'EXTENDED';
+    
+    const prevSchedule = allSchedules.find(s => 
+      s.room_id === parseInt(selectedRoom) && 
+      s.time_slot_id === slotId - 1 &&
+      s.section_id === schedule.section_id &&
+      isDayMatch(s.day, day)
+    );
+
+    if (prevSchedule && isExtended) {
+      return 'SKIP'; 
+    }
+
+    return { ...schedule, isExtended };
+  };
+
+  const downloadPDF = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/schedules', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 } // Fetch all
+      });
+      const allSchedules = response.data.items || [];
+
+      const doc = new jsPDF();
+      doc.text("Class Schedules", 14, 10);
+      
+      const tableColumn = ["ID", "Course", "Section", "Teacher", "Room", "Day", "Time"];
+      const tableRows = [];
+
+      allSchedules.forEach(schedule => {
+        const scheduleData = [
+          schedule.id,
+          schedule.section.course.code,
+          schedule.section.section_number,
+          schedule.section.teacher ? schedule.section.teacher.initial : 'TBA',
+          schedule.room.room_number,
+          schedule.day,
+          TIME_SLOTS[schedule.time_slot_id]
+        ];
+        tableRows.push(scheduleData);
+      });
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 20,
+      });
+
+      doc.save("schedules.pdf");
+    } catch (error) {
+      console.error("Failed to download PDF", error);
+      setStatus({ type: 'error', message: 'Failed to download PDF.' });
+    }
+  };
+
+  const downloadCSV = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/schedules', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 } // Fetch all
+      });
+      const allSchedules = response.data.items || [];
+
+      const headers = ["ID,Course,Section,Teacher,Room,Day,Time"];
+      const rows = allSchedules.map(schedule => 
+        `${schedule.id},${schedule.section.course.code},${schedule.section.section_number},${schedule.section.teacher ? schedule.section.teacher.initial : 'TBA'},${schedule.room.room_number},${schedule.day},"${TIME_SLOTS[schedule.time_slot_id]}"`
+      );
+
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "schedules.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Failed to download CSV", error);
+      setStatus({ type: 'error', message: 'Failed to download CSV.' });
+    }
+  };
+
   const handleAddSchedule = async (e) => {
     e.preventDefault();
     try {
@@ -149,6 +339,7 @@ const ManageSchedules = () => {
       setStatus({ type: 'success', message: 'Schedule added successfully.' });
       setIsAddModalOpen(false);
       fetchSchedules();
+      fetchAllSchedules();
       setNewSchedule({
         section_id: '',
         room_id: '',
@@ -170,6 +361,7 @@ const ManageSchedules = () => {
       });
       setStatus({ type: 'success', message: 'Schedule deleted successfully.' });
       fetchSchedules();
+      fetchAllSchedules();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete schedule.' });
     }
@@ -210,6 +402,7 @@ const ManageSchedules = () => {
       setStatus({ type: 'success', message: 'Selected schedules deleted successfully.' });
       setSelectedIds([]);
       fetchSchedules();
+      fetchAllSchedules();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete selected schedules.' });
     }
@@ -224,6 +417,7 @@ const ManageSchedules = () => {
       });
       setStatus({ type: 'success', message: 'All schedules deleted successfully.' });
       fetchSchedules();
+      fetchAllSchedules();
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to delete all schedules.' });
     }
@@ -243,17 +437,39 @@ const ManageSchedules = () => {
           <p className="text-slate-500">View and manage individual class schedule entries.</p>
         </div>
         
-        <div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={runAutoSchedule}
+            disabled={isRunning}
+            className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50"
+          >
+            {isRunning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+            Auto Schedule
+          </button>
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm mr-2"
+            className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm"
           >
             <CheckCircle className="h-4 w-4 mr-2" />
             Add Schedule
           </button>
           <button
+            onClick={downloadPDF}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            PDF
+          </button>
+          <button
+            onClick={downloadCSV}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            CSV
+          </button>
+          <button
             onClick={handleDeleteAll}
-            className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors shadow-sm mr-2"
+            className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors shadow-sm"
           >
             <Trash2 className="h-4 w-4 mr-2" />
             Delete All
@@ -278,6 +494,141 @@ const ManageSchedules = () => {
           {status.message}
         </div>
       )}
+
+      {/* Calendar View Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="mb-6 flex items-center gap-4">
+          <div className="flex items-center gap-2 text-slate-600">
+            <Filter className="h-5 w-5" />
+            <span className="font-medium">Filter by Room:</span>
+          </div>
+          
+          <div className="relative min-w-[250px]" ref={dropdownRef}>
+            <button 
+              onClick={() => setIsRoomDropdownOpen(!isRoomDropdownOpen)}
+              className="w-full px-3 py-2 text-left border border-slate-300 rounded-lg flex items-center justify-between bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            >
+              <span className="truncate">
+                {selectedRoom 
+                  ? (() => {
+                      const r = rooms.find(r => r.id == selectedRoom);
+                      return r ? `${r.room_number} (${r.type})` : 'Select Room';
+                    })()
+                  : 'Select Room'
+                }
+              </span>
+              <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0 ml-2" />
+            </button>
+
+            {isRoomDropdownOpen && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-60 flex flex-col">
+                <div className="p-2 border-b border-slate-100 sticky top-0 bg-white rounded-t-lg">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search room..."
+                      className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-indigo-500"
+                      value={roomSearchQuery}
+                      onChange={(e) => setRoomSearchQuery(e.target.value)}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {rooms
+                    .filter(room => 
+                      room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase())
+                    )
+                    .map(room => (
+                      <button
+                        key={room.id}
+                        onClick={() => {
+                          setSelectedRoom(room.id);
+                          setIsRoomDropdownOpen(false);
+                          setRoomSearchQuery('');
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-slate-50 flex items-center justify-between ${
+                          parseInt(selectedRoom) === room.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'
+                        }`}
+                      >
+                        <span>{room.room_number} ({room.type})</span>
+                        {parseInt(selectedRoom) === room.id && <Check className="h-4 w-4" />}
+                      </button>
+                    ))}
+                    {rooms.filter(room => room.room_number.toLowerCase().includes(roomSearchQuery.toLowerCase())).length === 0 && (
+                      <div className="px-4 py-3 text-sm text-slate-500 text-center">No rooms found</div>
+                    )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-slate-200">
+            <thead>
+              <tr>
+                <th className="p-3 border border-slate-200 bg-slate-50 text-slate-500 font-medium w-32">
+                  Time Slot
+                </th>
+                {DAYS.map((day, index) => (
+                  <th 
+                    key={day} 
+                    className={`p-3 border border-slate-200 font-semibold w-32 ${
+                      day === 'Friday' ? 'bg-slate-100 text-slate-400' : 'bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    {DAY_LABELS[index]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {CALENDAR_TIME_SLOTS.map((slot) => (
+                <tr key={slot.id}>
+                  <td className="p-3 border border-slate-200 text-xs text-slate-500 font-medium bg-slate-50">
+                    <div className="text-slate-900 font-bold mb-1">Slot {slot.id}</div>
+                    {slot.label}
+                  </td>
+                  {DAYS.map((day) => {
+                    const scheduleData = getScheduleForCell(day, slot.id);
+                    
+                    if (scheduleData === 'SKIP') return null;
+
+                    return (
+                      <td 
+                        key={day} 
+                        rowSpan={scheduleData?.isExtended ? 2 : 1}
+                        className={`p-2 border border-slate-200 align-top h-24 ${
+                          day === 'Friday' ? 'bg-slate-100/50' : ''
+                        }`}
+                      >
+                        {scheduleData && (
+                          <div className={`p-2 rounded-lg border text-xs h-full flex flex-col justify-between ${
+                            scheduleData.section.course.type === 'LAB' 
+                              ? 'bg-purple-50 border-purple-100 text-purple-700' 
+                              : 'bg-blue-50 border-blue-100 text-blue-700'
+                          }`}>
+                            <div>
+                              <div className="font-bold text-sm mb-1">{scheduleData.section.course.code}</div>
+                              <div className="line-clamp-2 mb-1">{scheduleData.section.course.title}</div>
+                            </div>
+                            <div className="font-medium opacity-75">
+                              Sec {scheduleData.section.section_number}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="flex items-center gap-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
         <Search className="h-5 w-5 text-slate-400" />

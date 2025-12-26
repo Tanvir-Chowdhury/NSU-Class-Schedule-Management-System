@@ -49,7 +49,12 @@ def get_next_day_date(day_name: str):
     """
     days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     today = datetime.date.today()
-    target_day_index = days.index(day_name)
+    try:
+        target_day_index = days.index(day_name)
+    except ValueError:
+        # Fallback for invalid day names
+        return today
+
     current_day_index = today.weekday()
     
     days_ahead = target_day_index - current_day_index
@@ -58,48 +63,65 @@ def get_next_day_date(day_name: str):
         
     return today + datetime.timedelta(days=days_ahead)
 
+def get_time_from_slot(slot_id: int):
+    slot_str = TIME_SLOTS.get(slot_id)
+    if not slot_str:
+        return datetime.time(0, 0)
+    start_str = slot_str.split(' - ')[0]
+    return datetime.datetime.strptime(start_str, "%I:%M %p").time()
+
 def sync_schedule(user: User, creds: Credentials, db: Session):
     service = build('calendar', 'v3', credentials=creds)
 
     # 1. Fetch Schedule Events
     events_to_sync = []
     
-    # A. Recurring Class Schedules (Teachers Only)
+    # Helper to process schedules
+    def process_schedules(schedules):
+        for sch in schedules:
+            course = sch.section.course
+            # Calculate next occurrence of this day
+            next_date = get_next_day_date(sch.day)
+            
+            # Calculate start and end datetime
+            start_time = get_time_from_slot(sch.time_slot_id)
+            start_dt = datetime.datetime.combine(next_date, start_time)
+            
+            duration_minutes = 190 if course.duration_mode == DurationMode.EXTENDED else 90
+            end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
+            
+            # Map day name to RRULE BYDAY
+            day_map = {
+                'Monday': 'MO', 'Tuesday': 'TU', 'Wednesday': 'WE', 
+                'Thursday': 'TH', 'Friday': 'FR', 'Saturday': 'SA', 'Sunday': 'SU'
+            }
+            byday = day_map.get(sch.day, 'MO')
+
+            events_to_sync.append({
+                'summary': f"{course.code} - {course.title}",
+                'location': sch.room.room_number if sch.room else "TBA",
+                'description': f"Section: {sch.section.section_number}",
+                'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
+                'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
+                'recurrence': [f'RRULE:FREQ=WEEKLY;COUNT=14;BYDAY={byday}']
+            })
+
+    # A. Recurring Class Schedules
     if user.role == "TEACHER":
         teacher = db.query(Teacher).filter(Teacher.user_id == user.id).first()
         if teacher:
             schedules = db.query(ClassSchedule).join(Section).filter(Section.teacher_id == teacher.id).all()
-            for sch in schedules:
-                course = sch.section.course
-                # Calculate next occurrence of this day
-                next_date = get_next_day_date(sch.day)
-                
-                # Calculate start and end datetime
-                # sch.start_time is datetime.time
-                start_dt = datetime.datetime.combine(next_date, sch.start_time)
-                
-                duration_minutes = 190 if course.duration_mode == DurationMode.EXTENDED else 90
-                end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
-                
-                # Map day name to RRULE BYDAY
-                day_map = {
-                    'Monday': 'MO', 'Tuesday': 'TU', 'Wednesday': 'WE', 
-                    'Thursday': 'TH', 'Friday': 'FR', 'Saturday': 'SA', 'Sunday': 'SU'
-                }
-                byday = day_map.get(sch.day, 'MO')
-
-                events_to_sync.append({
-                    'summary': f"{course.code} - {course.title}",
-                    'location': sch.room.room_number if sch.room else "TBA",
-                    'description': f"Section: {sch.section.section_number}",
-                    'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
-                    'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Asia/Dhaka'},
-                    'recurrence': [f'RRULE:FREQ=WEEKLY;COUNT=14;BYDAY={byday}']
-                })
+            process_schedules(schedules)
                 
     elif user.role == "STUDENT":
-        # Placeholder for student sync logic
-        pass
+        student = db.query(Student).filter(Student.user_id == user.id).first()
+        if student:
+            # Assuming Student has enrollments relationship
+            if hasattr(student, 'enrollments'):
+                for enrollment in student.enrollments:
+                    section = enrollment.section
+                    schedules = db.query(ClassSchedule).filter(ClassSchedule.section_id == section.id).all()
+                    process_schedules(schedules)
 
     # B. One-time Room Bookings (All Users)
     bookings = db.query(BookingRequest).filter(
@@ -108,8 +130,6 @@ def sync_schedule(user: User, creds: Credentials, db: Session):
     ).all()
 
     for booking in bookings:
-        # Map slot ID to time
-        # TIME_SLOTS is a dict like {1: "08:00 AM - 09:30 AM", ...}
         slot_str = TIME_SLOTS.get(booking.time_slot_id)
         if slot_str:
             start_str, end_str = slot_str.split(' - ')

@@ -9,7 +9,6 @@ import Dashboard from './pages/admin/Dashboard';
 import ManageCourses from './pages/admin/ManageCourses';
 import ManageTeachers from './pages/admin/ManageTeachers';
 import ManageRooms from './pages/admin/ManageRooms';
-import Scheduler from './pages/admin/Scheduler';
 import ManageSchedules from './pages/admin/ManageSchedules';
 import ManagePreferences from './pages/admin/ManagePreferences';
 import ManageBookings from './pages/admin/ManageBookings';
@@ -28,6 +27,7 @@ import GoogleCallback from './components/GoogleCallback';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import ChatWidget from './components/ChatWidget';
+import Teachers from './pages/Teachers';
 
 function App() {
   return (
@@ -36,6 +36,7 @@ function App() {
         <ChatWidget />
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/teachers" element={<Teachers />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/google/callback" element={<GoogleCallback />} />
@@ -77,14 +78,6 @@ function App() {
             <ProtectedRoute roles={['ADMIN']}>
               <Layout role="admin">
                 <ManageRooms />
-              </Layout>
-            </ProtectedRoute>
-          } />
-
-          <Route path="/admin/scheduler" element={
-            <ProtectedRoute roles={['ADMIN']}>
-              <Layout role="admin">
-                <Scheduler />
               </Layout>
             </ProtectedRoute>
           } />

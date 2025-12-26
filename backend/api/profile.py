@@ -4,6 +4,7 @@ from typing import List
 import shutil
 import os
 import uuid
+import json
 
 from core.database import get_db
 from core.security import get_current_active_user, get_student_user, get_teacher_user, get_password_hash, verify_password
@@ -24,58 +25,97 @@ router = APIRouter(
     tags=["Profile"]
 )
 
-def construct_student_text(user: User, student: Student, db: Session) -> str:
+def construct_student_data(user: User, student: Student, db: Session) -> dict:
     """
-    Constructs a text representation of the student's profile for RAG.
+    Constructs a data dictionary of the student's profile for RAG.
     """
-    text = f"Student Profile:\nEmail: {user.email}\n"
+    description = f"Student Profile:\nEmail: {user.email}\n"
     if student.nsu_id:
-        text += f"NSU ID: {student.nsu_id}\n"
+        description += f"NSU ID: {student.nsu_id}\n"
     if student.cgpa:
-        text += f"CGPA: {student.cgpa}\n"
+        description += f"CGPA: {student.cgpa}\n"
     
     # Fetch current sections (Enrollment logic not fully implemented, assuming we might have a way or just skip for now)
     # Since we don't have an Enrollment model yet, we'll skip current sections for Student RAG text in this iteration.
     # If we had enrollments, we would list them here.
     
-    return text
+    return {
+        "type": "student",
+        "email": user.email,
+        "nsu_id": student.nsu_id,
+        "cgpa": student.cgpa,
+        "description": description
+    }
 
-def construct_teacher_text(user: User, teacher: Teacher, db: Session) -> str:
+def construct_teacher_data(user: User, teacher: Teacher, db: Session) -> dict:
     """
-    Constructs a text representation of the teacher's profile for RAG.
+    Constructs a data dictionary of the teacher's profile for RAG.
     """
-    text = f"Teacher Profile:\nName: {teacher.name}\nInitial: {teacher.initial}\nEmail: {user.email}\n"
+    description = f"Teacher Profile:\nName: {teacher.name}\nInitial: {teacher.initial}\nEmail: {user.email}\n"
     
     if teacher.published_papers:
-        text += f"Published Papers: {teacher.published_papers}\n"
+        description += f"Published Papers: {teacher.published_papers}\n"
     if teacher.research_interests:
-        text += f"Research Interests: {teacher.research_interests}\n"
+        description += f"Research Interests: {teacher.research_interests}\n"
     if teacher.projects:
-        text += f"Projects: {teacher.projects}\n"
+        description += f"Projects: {teacher.projects}\n"
     if teacher.contact_details:
-        text += f"Contact Details: {teacher.contact_details}\n"
+        description += f"Contact Details: {teacher.contact_details}\n"
 
+    office_hours_list = []
     if teacher.office_hours:
-        text += "Office Hours:\n"
+        description += "Office Hours:\n"
         for oh in teacher.office_hours:
             course_info = f" (Course: {oh.course.code})" if oh.course else " (General)"
-            text += f"- {oh.day}: {oh.start_time} - {oh.end_time}{course_info}\n"
+            description += f"- {oh.day}: {oh.start_time} - {oh.end_time}{course_info}\n"
+            office_hours_list.append({
+                "day": oh.day,
+                "start_time": str(oh.start_time),
+                "end_time": str(oh.end_time),
+                "course": oh.course.code if oh.course else None
+            })
     
+    assigned_courses = []
     # Fetch assigned sections
     sections = db.query(Section).filter(Section.teacher_id == teacher.id).all()
     if sections:
-        text += "Assigned Courses:\n"
+        description += "Assigned Courses:\n"
         for section in sections:
             course = section.course
-            text += f"- {course.code}: {course.title} (Section {section.section_number})\n"
+            description += f"- {course.code}: {course.title} (Section {section.section_number})\n"
             
+            schedules_list = []
             # Fetch schedules for this section
             schedules = db.query(ClassSchedule).filter(ClassSchedule.section_id == section.id).all()
             for sched in schedules:
                 slot_time = TIME_SLOTS.get(sched.time_slot_id, "Unknown Time")
-                text += f"  - {sched.day} {slot_time} (Room {sched.room.room_number})\n"
+                description += f"  - {sched.day} {slot_time} (Room {sched.room.room_number})\n"
+                schedules_list.append({
+                    "day": sched.day,
+                    "time": slot_time,
+                    "room": sched.room.room_number
+                })
+            
+            assigned_courses.append({
+                "code": course.code,
+                "title": course.title,
+                "section": section.section_number,
+                "schedules": schedules_list
+            })
     
-    return text
+    return {
+        "type": "teacher",
+        "name": teacher.name,
+        "initial": teacher.initial,
+        "email": user.email,
+        "published_papers": teacher.published_papers,
+        "research_interests": teacher.research_interests,
+        "projects": teacher.projects,
+        "contact_details": teacher.contact_details,
+        "office_hours": office_hours_list,
+        "assigned_courses": assigned_courses,
+        "description": description
+    }
 
 @router.get("/student", response_model=StudentSchema)
 def get_student_profile(
@@ -123,9 +163,9 @@ def update_student_profile(
     db.refresh(student)
     
     # Trigger RAG Update
-    data_text = construct_student_text(current_user, student, db)
+    data = construct_student_data(current_user, student, db)
     vector_id = f"{UserRole.STUDENT}_{current_user.id}"
-    trigger_rag_update(background_tasks, vector_id, data_text, {"user_id": current_user.id, "role": UserRole.STUDENT})
+    trigger_rag_update(background_tasks, vector_id, json.dumps(data), {"user_id": current_user.id, "role": UserRole.STUDENT})
     
     return student
 
@@ -218,9 +258,9 @@ def update_teacher_profile(
     db.refresh(teacher)
     
     # Trigger RAG Update
-    data_text = construct_teacher_text(current_user, teacher, db)
+    data = construct_teacher_data(current_user, teacher, db)
     vector_id = f"{UserRole.TEACHER}_{current_user.id}"
-    trigger_rag_update(background_tasks, vector_id, data_text, {"user_id": current_user.id, "role": UserRole.TEACHER})
+    trigger_rag_update(background_tasks, vector_id, json.dumps(data), {"user_id": current_user.id, "role": UserRole.TEACHER})
     
     return teacher
 

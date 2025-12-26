@@ -58,9 +58,10 @@ def get_teacher_stats(
         .filter(BookingRequest.user_id == current_user.id, BookingRequest.status == "PENDING").scalar()
 
     # 4. Total Credits (of assigned courses)
-    # Get all distinct courses assigned to teacher
-    assigned_courses = db.query(Course).join(Section).filter(Section.teacher_id == teacher.id).distinct().all()
-    total_credits = sum(course.credits for course in assigned_courses)
+    # Sum credits of all sections assigned to teacher (e.g. 4 sections of 3 credits = 12 credits)
+    total_credits = db.query(func.sum(Course.credits))\
+        .join(Section, Section.course_id == Course.id)\
+        .filter(Section.teacher_id == teacher.id).scalar()
 
     return {
         "total_courses": total_courses or 0,

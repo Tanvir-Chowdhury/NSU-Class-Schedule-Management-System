@@ -16,8 +16,11 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const ManageTeachers = () => {
   const [teachers, setTeachers] = useState([]);
@@ -49,6 +52,71 @@ const ManageTeachers = () => {
   useEffect(() => {
     fetchTeachers(1, sortConfig, searchQuery);
   }, [sortConfig, searchQuery]);
+
+  const downloadPDF = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/teachers', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allTeachers = response.data.items || [];
+
+      const doc = new jsPDF();
+      doc.text("Teachers List", 14, 10);
+      
+      const tableColumn = ["Initial", "Name", "Department", "Faculty Type", "Contact"];
+      const tableRows = [];
+
+      allTeachers.forEach(teacher => {
+        const teacherData = [
+          teacher.initial,
+          teacher.name,
+          teacher.department || 'N/A',
+          teacher.faculty_type || 'N/A',
+          teacher.contact_details || 'N/A'
+        ];
+        tableRows.push(teacherData);
+      });
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 20,
+      });
+
+      doc.save("teachers.pdf");
+    } catch (error) {
+      console.error("Failed to download PDF", error);
+      setStatus({ type: 'error', message: 'Failed to download PDF.' });
+    }
+  };
+
+  const downloadCSV = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/teachers', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allTeachers = response.data.items || [];
+
+      const headers = ["Initial,Name,Department,Faculty Type,Contact"];
+      const rows = allTeachers.map(teacher => 
+        `${teacher.initial},"${teacher.name}",${teacher.department || ''},${teacher.faculty_type || ''},"${teacher.contact_details || ''}"`
+      );
+
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "teachers.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Failed to download CSV", error);
+      setStatus({ type: 'error', message: 'Failed to download CSV.' });
+    }
+  };
 
   const fetchTeachers = async (page = 1, currentSort = sortConfig, currentSearch = searchQuery) => {
     try {
@@ -226,6 +294,20 @@ const ManageTeachers = () => {
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Teacher
+          </button>
+          <button
+            onClick={downloadPDF}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm mr-3"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            PDF
+          </button>
+          <button
+            onClick={downloadCSV}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm mr-3"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            CSV
           </button>
           <input
             type="file"

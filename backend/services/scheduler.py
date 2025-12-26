@@ -1,9 +1,63 @@
 from sqlalchemy.orm import Session
 from typing import List, Dict
+import re
 from models.schedule import ClassSchedule, Section
 from models.academic import Room, Course, ClassType, DurationMode
 from models.teacher import Teacher, TeacherPreference, TeacherTimingPreference
+from models.user import User, UserRole
+from core.security import get_password_hash
 from core.constants import TIME_SLOTS, LAB_DAYS, THEORY_DAYS
+
+def ensure_tba_teacher(db: Session) -> Teacher:
+    """
+    Ensures that a 'TBA' teacher exists in the database.
+    """
+    tba = db.query(Teacher).filter(Teacher.initial == "TBA").first()
+    if tba:
+        return tba
+    
+    # Create User for TBA
+    user = db.query(User).filter(User.email == "tba@northsouth.edu").first()
+    if not user:
+        user = User(
+            email="tba@northsouth.edu",
+            password_hash=get_password_hash("tba123"),
+            role=UserRole.TEACHER,
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+    # Create Teacher Profile
+    tba = Teacher(
+        user_id=user.id,
+        initial="TBA",
+        name="To Be Announced",
+        department="General"
+    )
+    db.add(tba)
+    db.commit()
+    db.refresh(tba)
+    return tba
+
+def assign_remaining_to_tba(db: Session):
+    """
+    Assigns all unassigned sections to the 'TBA' teacher.
+    """
+    tba = ensure_tba_teacher(db)
+    
+    # Find all sections with no teacher
+    sections = db.query(Section).filter(Section.teacher_id == None).all()
+    
+    count = 0
+    for section in sections:
+        section.teacher_id = tba.id
+        count += 1
+        
+    if count > 0:
+        print(f"Assigned {count} remaining sections to TBA.")
+    db.commit()
 
 def get_preferred_slots(db: Session, teacher_id: int) -> List[Dict]:
     """
@@ -31,6 +85,8 @@ def assign_teachers_to_sections(db: Session):
     """
     Assigns teachers to sections based on accepted preferences.
     Only assigns to sections that currently have no teacher.
+    Also ensures that if a teacher is assigned to a Theory course, 
+    they are also assigned to the corresponding Lab course (if it exists).
     """
     # 1. Fetch all accepted preferences
     preferences = db.query(TeacherPreference).filter(TeacherPreference.status == 'accepted').all()
@@ -46,7 +102,36 @@ def assign_teachers_to_sections(db: Session):
         for section in sections:
             section.teacher_id = pref.teacher_id
             
+            # Check for corresponding Lab/Theory course
+            # Assumption: Lab code is Theory code + 'L' (e.g., CSE115 -> CSE115L)
+            course = section.course
+            target_code = ""
+            if course.code.endswith('L'):
+                # It's a lab, look for theory (remove 'L')
+                target_code = course.code[:-1]
+            else:
+                # It's a theory, look for lab (add 'L')
+                target_code = course.code + 'L'
+            
+            target_course = db.query(Course).filter(Course.code == target_code).first()
+            
+            if target_course:
+                # Find a corresponding section for the target course
+                # Ideally, we match section numbers (Sec 1 Theory -> Sec 1 Lab)
+                target_section = db.query(Section).filter(
+                    Section.course_id == target_course.id,
+                    Section.section_number == section.section_number,
+                    Section.teacher_id == None
+                ).first()
+                
+                if target_section:
+                    target_section.teacher_id = pref.teacher_id
+                    print(f"Auto-assigned {pref.teacher.initial} to {target_code} Section {target_section.section_number} (Linked to {course.code})")
+
     db.commit()
+    
+    # Assign remaining sections to TBA
+    assign_remaining_to_tba(db)
 
 class ScheduleMatrix:
     """
@@ -149,6 +234,16 @@ class ScheduleMatrix:
             self.teacher_matrix[teacher_id][day] = {}
         self.teacher_matrix[teacher_id][day][slot] = True
 
+def get_room_level(room_number: str) -> int:
+    """
+    Extracts the numeric part of the room number to determine the floor level.
+    e.g., 'SAC202' -> 202, 'NAC305' -> 305.
+    """
+    match = re.search(r'\d+', room_number)
+    if match:
+        return int(match.group())
+    return 9999 # Fallback
+
 def schedule_extended_labs(db: Session, matrix: ScheduleMatrix):
     """
     Pass 1: Schedule Extended Labs (2 consecutive slots).
@@ -167,6 +262,8 @@ def schedule_extended_labs(db: Session, matrix: ScheduleMatrix):
 
     # Fetch LAB rooms
     lab_rooms = db.query(Room).filter(Room.type == ClassType.LAB).all()
+    # Sort rooms by level (e.g. 200s before 300s)
+    lab_rooms.sort(key=lambda r: get_room_level(r.room_number))
     
     scheduled_count = 0
     
@@ -208,7 +305,7 @@ def schedule_extended_labs(db: Session, matrix: ScheduleMatrix):
                 # Check if this combination matches any preference
                 for pref in preferred_slots:
                     if pref['day'] == day and (pref['slot_id'] == slot1 or pref['slot_id'] == slot2):
-                        score += 1
+                        score += 10 # High priority
                 
                 valid_combinations.append({'day': day, 'slot1': slot1, 'slot2': slot2, 'score': score})
         
@@ -271,6 +368,8 @@ def schedule_standard_courses(db: Session, matrix: ScheduleMatrix):
     - Theory Logic:
         - Try to fit into THEORY rooms.
         - Must match Patterns: ST (Sun+Tue), MW (Mon+Wed), or RA (Thu+Sat) at the same time slot.
+        - ECE Dept -> SAC Rooms (SAC%)
+        - Other Depts -> NAC Rooms (NAC%)
     - Special Lab Logic:
         - Try to fit into LAB rooms.
         - Must match Patterns: ST (Sun+Tue), MW (Mon+Wed), or RA (Thu+Sat) at the same time slot.
@@ -283,6 +382,10 @@ def schedule_standard_courses(db: Session, matrix: ScheduleMatrix):
     theory_rooms = db.query(Room).filter(Room.type == ClassType.THEORY).all()
     lab_rooms = db.query(Room).filter(Room.type == ClassType.LAB).all()
 
+    # Sort rooms by level (e.g. 200s before 300s)
+    theory_rooms.sort(key=lambda r: get_room_level(r.room_number))
+    lab_rooms.sort(key=lambda r: get_room_level(r.room_number))
+
     scheduled_count = 0
 
     for section in sections:
@@ -292,9 +395,20 @@ def schedule_standard_courses(db: Session, matrix: ScheduleMatrix):
 
         assigned = False
         
-        # Determine target rooms based on course type
+        # Determine target rooms based on course type and teacher department
         if section.course.type == ClassType.THEORY:
-            target_rooms = theory_rooms
+            # Filter rooms based on department
+            teacher = section.teacher
+            if teacher and teacher.department == "ECE":
+                # ECE gets SAC rooms
+                target_rooms = [r for r in theory_rooms if r.room_number.startswith("SAC")]
+            else:
+                # Others get NAC rooms (or anything not SAC if NAC doesn't exist, but assuming NAC exists)
+                target_rooms = [r for r in theory_rooms if r.room_number.startswith("NAC")]
+                
+            # Fallback: If no specific rooms found (e.g. no SAC rooms), use all theory rooms
+            if not target_rooms:
+                target_rooms = theory_rooms
         else: # Special Labs
             target_rooms = lab_rooms
 
@@ -310,7 +424,7 @@ def schedule_standard_courses(db: Session, matrix: ScheduleMatrix):
                 score = 0
                 for pref in preferred_slots:
                     if (pref['day'] == day1 or pref['day'] == day2) and pref['slot_id'] == slot:
-                        score += 1
+                        score += 10 # High priority for matching preference
                 valid_combinations.append({'pattern': pattern, 'day1': day1, 'day2': day2, 'slot': slot, 'score': score})
         
         valid_combinations.sort(key=lambda x: x['score'], reverse=True)

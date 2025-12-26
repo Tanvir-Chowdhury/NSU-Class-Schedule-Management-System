@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, case
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr
+import json
 
 from core.database import get_db
 from core.security import get_admin_user, get_password_hash
@@ -51,8 +52,14 @@ def create_room(room: RoomCreate, background_tasks: BackgroundTasks, db: Session
     db.refresh(new_room)
 
     # RAG Update
-    rag_text = f"Room {new_room.room_number} is a {new_room.type} room with capacity {new_room.capacity}."
-    trigger_rag_update(background_tasks, f"room_{new_room.id}", rag_text, {"type": "room", "room_number": new_room.room_number})
+    rag_data = {
+        "type": "room",
+        "room_number": new_room.room_number,
+        "room_type": new_room.type,
+        "capacity": new_room.capacity,
+        "description": f"Room {new_room.room_number} is a {new_room.type} room with capacity {new_room.capacity}."
+    }
+    trigger_rag_update(background_tasks, f"room_{new_room.id}", json.dumps(rag_data), {"type": "room", "room_number": new_room.room_number})
 
     return new_room
 
@@ -102,8 +109,14 @@ def update_room(room_id: int, room: RoomCreate, background_tasks: BackgroundTask
     db.refresh(db_room)
 
     # RAG Update
-    rag_text = f"Room {db_room.room_number} is a {db_room.type} room with capacity {db_room.capacity}."
-    trigger_rag_update(background_tasks, f"room_{db_room.id}", rag_text, {"type": "room", "room_number": db_room.room_number})
+    rag_data = {
+        "type": "room",
+        "room_number": db_room.room_number,
+        "room_type": db_room.type,
+        "capacity": db_room.capacity,
+        "description": f"Room {db_room.room_number} is a {db_room.type} room with capacity {db_room.capacity}."
+    }
+    trigger_rag_update(background_tasks, f"room_{db_room.id}", json.dumps(rag_data), {"type": "room", "room_number": db_room.room_number})
 
     return db_room
 
@@ -143,8 +156,14 @@ async def upload_rooms(background_tasks: BackgroundTasks, file: UploadFile = Fil
         for room in new_rooms:
             db.refresh(room)
             # RAG Update
-            rag_text = f"Room {room.room_number} is a {room.type} room with capacity {room.capacity}."
-            trigger_rag_update(background_tasks, f"room_{room.id}", rag_text, {"type": "room", "room_number": room.room_number})
+            rag_data = {
+                "type": "room",
+                "room_number": room.room_number,
+                "room_type": room.type,
+                "capacity": room.capacity,
+                "description": f"Room {room.room_number} is a {room.type} room with capacity {room.capacity}."
+            }
+            trigger_rag_update(background_tasks, f"room_{room.id}", json.dumps(rag_data), {"type": "room", "room_number": room.room_number})
             
     return new_rooms
 
@@ -177,8 +196,14 @@ def create_course(course: CourseCreate, background_tasks: BackgroundTasks, db: S
         db.refresh(new_course)
     
     # RAG Update
-    rag_text = f"Course {new_course.code}: {new_course.title} ({new_course.credits} credits). Type: {new_course.type}."
-    trigger_rag_update(background_tasks, f"course_{new_course.id}", rag_text, {"type": "course", "code": new_course.code, "title": new_course.title})
+    rag_data = {
+        "type": "course",
+        "code": new_course.code,
+        "title": new_course.title,
+        "credits": new_course.credits,
+        "description": f"Course {new_course.code}: {new_course.title} ({new_course.credits} credits). Type: {new_course.type}."
+    }
+    trigger_rag_update(background_tasks, f"course_{new_course.id}", json.dumps(rag_data), {"type": "course", "code": new_course.code, "title": new_course.title})
         
     return new_course
 
@@ -270,8 +295,14 @@ def update_course(course_id: int, course: CourseCreate, background_tasks: Backgr
     db.expire(db_course, ['sections'])
 
     # RAG Update
-    rag_text = f"Course {db_course.code}: {db_course.title} ({db_course.credits} credits). Type: {db_course.type}."
-    trigger_rag_update(background_tasks, f"course_{db_course.id}", rag_text, {"type": "course", "code": db_course.code, "title": db_course.title})
+    rag_data = {
+        "type": "course",
+        "code": db_course.code,
+        "title": db_course.title,
+        "credits": db_course.credits,
+        "description": f"Course {db_course.code}: {db_course.title} ({db_course.credits} credits). Type: {db_course.type}."
+    }
+    trigger_rag_update(background_tasks, f"course_{db_course.id}", json.dumps(rag_data), {"type": "course", "code": db_course.code, "title": db_course.title})
 
     return db_course
 
@@ -324,8 +355,14 @@ async def upload_courses(background_tasks: BackgroundTasks, file: UploadFile = F
     for course in new_courses:
         db.refresh(course)
         # RAG Update
-        rag_text = f"Course {course.code}: {course.title} ({course.credits} credits). Type: {course.type}."
-        trigger_rag_update(background_tasks, f"course_{course.id}", rag_text, {"type": "course", "code": course.code, "title": course.title})
+        rag_data = {
+            "type": "course",
+            "code": course.code,
+            "title": course.title,
+            "credits": course.credits,
+            "description": f"Course {course.code}: {course.title} ({course.credits} credits). Type: {course.type}."
+        }
+        trigger_rag_update(background_tasks, f"course_{course.id}", json.dumps(rag_data), {"type": "course", "code": course.code, "title": course.title})
 
     return new_courses
 
@@ -372,8 +409,15 @@ def create_teacher(teacher: TeacherCreate, background_tasks: BackgroundTasks, db
     db.refresh(new_teacher)
 
     # RAG Update
-    rag_text = f"Teacher {new_teacher.name} ({new_teacher.initial}). Email: {new_user.email}."
-    trigger_rag_update(background_tasks, f"teacher_{new_teacher.id}", rag_text, {"type": "teacher", "initial": new_teacher.initial, "name": new_teacher.name})
+    rag_data = {
+        "type": "teacher",
+        "name": new_teacher.name,
+        "initial": new_teacher.initial,
+        "email": new_user.email,
+        "department": new_teacher.department,
+        "description": f"Teacher {new_teacher.name} ({new_teacher.initial}). Email: {new_user.email}."
+    }
+    trigger_rag_update(background_tasks, f"teacher_{new_teacher.id}", json.dumps(rag_data), {"type": "teacher", "initial": new_teacher.initial, "name": new_teacher.name})
     
     return new_teacher
 
@@ -441,8 +485,15 @@ def update_teacher(teacher_id: int, teacher_update: TeacherUpdate, background_ta
 
     # RAG Update
     db_user = db.query(User).filter(User.id == db_teacher.user_id).first()
-    rag_text = f"Teacher {db_teacher.name} ({db_teacher.initial}). Email: {db_user.email if db_user else 'N/A'}."
-    trigger_rag_update(background_tasks, f"teacher_{db_teacher.id}", rag_text, {"type": "teacher", "initial": db_teacher.initial, "name": db_teacher.name})
+    rag_data = {
+        "type": "teacher",
+        "name": db_teacher.name,
+        "initial": db_teacher.initial,
+        "email": db_user.email if db_user else 'N/A',
+        "department": db_teacher.department,
+        "description": f"Teacher {db_teacher.name} ({db_teacher.initial}). Email: {db_user.email if db_user else 'N/A'}."
+    }
+    trigger_rag_update(background_tasks, f"teacher_{db_teacher.id}", json.dumps(rag_data), {"type": "teacher", "initial": db_teacher.initial, "name": db_teacher.name})
 
     return db_teacher
 
@@ -517,8 +568,15 @@ async def upload_teachers(background_tasks: BackgroundTasks, file: UploadFile = 
         db.refresh(teacher)
         # RAG Update
         db_user = db.query(User).filter(User.id == teacher.user_id).first()
-        rag_text = f"Teacher {teacher.name} ({teacher.initial}). Email: {db_user.email if db_user else 'N/A'}."
-        trigger_rag_update(background_tasks, f"teacher_{teacher.id}", rag_text, {"type": "teacher", "initial": teacher.initial, "name": teacher.name})
+        rag_data = {
+            "type": "teacher",
+            "name": teacher.name,
+            "initial": teacher.initial,
+            "email": db_user.email if db_user else 'N/A',
+            "department": teacher.department,
+            "description": f"Teacher {teacher.name} ({teacher.initial}). Email: {db_user.email if db_user else 'N/A'}."
+        }
+        trigger_rag_update(background_tasks, f"teacher_{teacher.id}", json.dumps(rag_data), {"type": "teacher", "initial": teacher.initial, "name": teacher.name})
 
     return created_teachers
 
@@ -636,15 +694,22 @@ def run_auto_scheduler(background_tasks: BackgroundTasks, db: Session = Depends(
     
     for schedule in schedules:
         time_str = TIME_SLOTS.get(schedule.time_slot_id, "Unknown Time")
-        rag_text = f"Class: {schedule.section.course.code} - {schedule.section.course.title} (Section {schedule.section.section_number}). " \
-                   f"Teacher: {schedule.section.teacher.initial}. " \
-                   f"Room: {schedule.room.room_number}. " \
-                   f"Time: {schedule.day} {time_str}."
+        rag_data = {
+            "type": "schedule",
+            "course_code": schedule.section.course.code,
+            "course_title": schedule.section.course.title,
+            "section_number": schedule.section.section_number,
+            "teacher_initial": schedule.section.teacher.initial,
+            "room_number": schedule.room.room_number,
+            "day": schedule.day,
+            "time": time_str,
+            "description": f"Class: {schedule.section.course.code} - {schedule.section.course.title} (Section {schedule.section.section_number}). Teacher: {schedule.section.teacher.initial}. Room: {schedule.room.room_number}. Time: {schedule.day} {time_str}."
+        }
         
         trigger_rag_update(
             background_tasks, 
             f"schedule_{schedule.id}", 
-            rag_text, 
+            json.dumps(rag_data), 
             {
                 "type": "schedule", 
                 "course_code": schedule.section.course.code,
@@ -758,15 +823,22 @@ def create_schedule(schedule: ClassScheduleCreate, background_tasks: BackgroundT
     
     # RAG Update
     time_str = TIME_SLOTS.get(new_schedule.time_slot_id, "Unknown Time")
-    rag_text = f"Class: {new_schedule.section.course.code} - {new_schedule.section.course.title} (Section {new_schedule.section.section_number}). " \
-               f"Teacher: {new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA'}. " \
-               f"Room: {new_schedule.room.room_number}. " \
-               f"Time: {new_schedule.day} {time_str}."
+    rag_data = {
+        "type": "schedule",
+        "course_code": new_schedule.section.course.code,
+        "course_title": new_schedule.section.course.title,
+        "section_number": new_schedule.section.section_number,
+        "teacher_initial": new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA',
+        "room_number": new_schedule.room.room_number,
+        "day": new_schedule.day,
+        "time": time_str,
+        "description": f"Class: {new_schedule.section.course.code} - {new_schedule.section.course.title} (Section {new_schedule.section.section_number}). Teacher: {new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA'}. Room: {new_schedule.room.room_number}. Time: {new_schedule.day} {time_str}."
+    }
     
     trigger_rag_update(
         background_tasks, 
         f"schedule_{new_schedule.id}", 
-        rag_text, 
+        json.dumps(rag_data), 
         {
             "type": "schedule", 
             "course_code": new_schedule.section.course.code,
@@ -855,8 +927,12 @@ def delete_all_schedules(background_tasks: BackgroundTasks, db: Session = Depend
     # Get all IDs first to delete from RAG
     all_ids = [s.id for s in db.query(ClassSchedule.id).all()]
     
-    db.query(ClassSchedule).delete()
-    db.commit()
+    try:
+        db.query(ClassSchedule).delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete schedules: {str(e)}")
     
     if all_ids:
         trigger_rag_bulk_delete(background_tasks, [f"schedule_{id}" for id in all_ids])

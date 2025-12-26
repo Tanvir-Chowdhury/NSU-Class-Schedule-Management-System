@@ -16,8 +16,11 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const ManageRooms = () => {
   const [rooms, setRooms] = useState([]);
@@ -46,6 +49,69 @@ const ManageRooms = () => {
   useEffect(() => {
     fetchRooms(1, sortConfig, searchQuery);
   }, [sortConfig, searchQuery]);
+
+  const downloadPDF = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/rooms', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allRooms = response.data.items || [];
+
+      const doc = new jsPDF();
+      doc.text("Rooms List", 14, 10);
+      
+      const tableColumn = ["Room Number", "Capacity", "Type"];
+      const tableRows = [];
+
+      allRooms.forEach(room => {
+        const roomData = [
+          room.room_number,
+          room.capacity,
+          room.type
+        ];
+        tableRows.push(roomData);
+      });
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 20,
+      });
+
+      doc.save("rooms.pdf");
+    } catch (error) {
+      console.error("Failed to download PDF", error);
+      setStatus({ type: 'error', message: 'Failed to download PDF.' });
+    }
+  };
+
+  const downloadCSV = async () => {
+    try {
+      const response = await axios.get('http://localhost:8000/admin/rooms', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 10000 }
+      });
+      const allRooms = response.data.items || [];
+
+      const headers = ["Room Number,Capacity,Type"];
+      const rows = allRooms.map(room => 
+        `${room.room_number},${room.capacity},${room.type}`
+      );
+
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "rooms.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Failed to download CSV", error);
+      setStatus({ type: 'error', message: 'Failed to download CSV.' });
+    }
+  };
 
   const fetchRooms = async (page = 1, currentSort = sortConfig, currentSearch = searchQuery) => {
     try {
@@ -231,6 +297,20 @@ const ManageRooms = () => {
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Room
+          </button>
+          <button
+            onClick={downloadPDF}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            PDF
+          </button>
+          <button
+            onClick={downloadCSV}
+            className="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors shadow-sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            CSV
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}

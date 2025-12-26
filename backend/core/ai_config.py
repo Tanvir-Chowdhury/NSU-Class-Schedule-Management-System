@@ -22,10 +22,24 @@ def get_embeddings(text: str):
     """
     try:
         embeddings_batch_response = mistral_client.embeddings.create(
-            model="mistral-embed-2312",
+            model="mistral-embed",
             inputs=[text],
         )
         return embeddings_batch_response.data[0].embedding
     except Exception as e:
         print(f"Error generating embeddings: {e}")
+        return None
+
+def get_embeddings_batch(texts: list):
+    """
+    Generates embeddings for a list of texts using Mistral's embedding model.
+    """
+    try:
+        embeddings_batch_response = mistral_client.embeddings.create(
+            model="mistral-embed",
+            inputs=texts,
+        )
+        return [data.embedding for data in embeddings_batch_response.data]
+    except Exception as e:
+        print(f"Error generating batch embeddings: {e}")
         return None

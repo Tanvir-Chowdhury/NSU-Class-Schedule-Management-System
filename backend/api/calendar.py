@@ -49,9 +49,10 @@ def get_my_schedule(
                 
                 events.append({
                     "id": f"class-{sch.id}",
-                    "title": f"{course.code} - {course.title}",
+                    "title": course.code,
                     "type": "class",
                     "day": sch.day,
+                    "time_slot_id": sch.time_slot_id,
                     "start_time": get_start_time_from_slot(sch.time_slot_id),
                     "duration_minutes": duration_minutes,
                     "room": sch.room.room_number if sch.room else "TBA",
@@ -69,9 +70,10 @@ def get_my_schedule(
                     duration_minutes = 190 if course.duration_mode == "EXTENDED" else 90
                     events.append({
                         "id": f"class-{sch.id}",
-                        "title": f"{course.code} - {course.title}",
+                        "title": course.code,
                         "type": "class",
                         "day": sch.day,
+                        "time_slot_id": sch.time_slot_id,
                         "start_time": get_start_time_from_slot(sch.time_slot_id),
                         "duration_minutes": duration_minutes,
                         "room": sch.room.room_number if sch.room else "TBA",
@@ -91,6 +93,7 @@ def get_my_schedule(
             "id": f"booking-{booking.id}",
             "title": f"Booking: {booking.reason}",
             "type": "booking",
+            "time_slot_id": booking.time_slot_id,
             "start": f"{booking.booking_date}T{start_time_str}:00",
             "end": f"{booking.booking_date}T{start_time_str}:00", # Frontend will adjust end
             "duration_minutes": 90, # Standard slot duration

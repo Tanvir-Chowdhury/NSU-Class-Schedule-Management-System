@@ -119,27 +119,28 @@ const ChatWidget = () => {
                   }`}
                 >
                   {msg.sender === 'bot' ? (
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
-                      className="prose prose-sm max-w-none prose-indigo prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0"
-                      components={{
-                        table: ({node, ...props}) => (
-                          <div className="overflow-x-auto my-2 rounded-lg border border-slate-200">
-                            <table className="min-w-full divide-y divide-slate-200" {...props} />
-                          </div>
-                        ),
-                        thead: ({node, ...props}) => <thead className="bg-slate-50" {...props} />,
-                        th: ({node, ...props}) => <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" {...props} />,
-                        td: ({node, ...props}) => <td className="px-3 py-2 whitespace-nowrap text-sm text-slate-600 border-t border-slate-100" {...props} />,
-                        p: ({node, ...props}) => <p className="mb-1 last:mb-0" {...props} />,
-                        ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                        ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
-                        li: ({node, ...props}) => <li className="pl-1" {...props} />,
-                        a: ({node, ...props}) => <a className="text-indigo-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                      }}
-                    >
-                      {msg.text}
-                    </ReactMarkdown>
+                    <div className="prose prose-sm max-w-none prose-indigo prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          table: ({node, ...props}) => (
+                            <div className="overflow-x-auto my-2 rounded-lg border border-slate-200">
+                              <table className="min-w-full divide-y divide-slate-200" {...props} />
+                            </div>
+                          ),
+                          thead: ({node, ...props}) => <thead className="bg-slate-50" {...props} />,
+                          th: ({node, ...props}) => <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" {...props} />,
+                          td: ({node, ...props}) => <td className="px-3 py-2 whitespace-nowrap text-sm text-slate-600 border-t border-slate-100" {...props} />,
+                          p: ({node, ...props}) => <p className="mb-1 last:mb-0" {...props} />,
+                          ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                          ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                          li: ({node, ...props}) => <li className="pl-1" {...props} />,
+                          a: ({node, ...props}) => <a className="text-indigo-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                        }}
+                      >
+                        {msg.text}
+                      </ReactMarkdown>
+                    </div>
                   ) : (
                     msg.text
                   )}

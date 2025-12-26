@@ -195,35 +195,6 @@ const Dashboard = () => {
             </form>
           </div>
 
-          {/* Busiest Rooms */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-                <Activity className="h-5 w-5 text-slate-500" />
-                Top 5 Busiest Rooms
-              </h3>
-            </div>
-            
-            <div className="space-y-4">
-              {stats.room_usage.length > 0 ? (
-                stats.room_usage.map((room, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-white border border-slate-200 flex items-center justify-center text-sm font-bold text-slate-700">
-                        {index + 1}
-                      </div>
-                      <span className="font-medium text-slate-900">{room.name}</span>
-                    </div>
-                    <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
-                      {room.value} classes
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-slate-500 text-center py-4">No schedule data available.</p>
-              )}
-            </div>
-          </div>
 
           {/* Quick Stats */}
           <div className="bg-indigo-600 p-6 rounded-xl shadow-sm text-white">
