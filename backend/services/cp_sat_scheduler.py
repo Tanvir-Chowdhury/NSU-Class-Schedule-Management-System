@@ -253,7 +253,8 @@ class CpSatAutoScheduler:
                 # If it's a PREF candidate (they explicitly asked for this course), 
                 # we ignore the general 'pref_days' constraint.
                 # We only enforce it for Adjuncts who are NOT PREF (which shouldn't happen in this logic, but good for safety).
-                if tid != tba.id and t_data['is_adjunct'] and ctype != 'PREF' and not t_data['pref_days']:
+                # UPDATE: Adjuncts MUST have their preferred days respected even if they requested the course.
+                if tid != tba.id and t_data['is_adjunct'] and not t_data['pref_days']:
                     continue 
 
                 group_options = []
@@ -289,8 +290,8 @@ class CpSatAutoScheduler:
                     for pattern in patterns:
                         actual_days = [pattern] if pattern in LAB_DAYS else THEORY_DAYS[pattern]
                         
-                        # RELAXED CONSTRAINT HERE TOO:
-                        if tid != tba.id and t_data['is_adjunct'] and ctype != 'PREF':
+                        # ADJUNCT CONSTRAINT: Must be on preferred days
+                        if tid != tba.id and t_data['is_adjunct']:
                             if not all(d in t_data['pref_days'] for d in actual_days):
                                 continue 
                         
@@ -315,16 +316,27 @@ class CpSatAutoScheduler:
                                 score = PENALTY_TBA
                             else:
                                 match_d = all(d in t_data['pref_days'] for d in actual_days)
+                                match_s = True
+                                for d in actual_days:
+                                    for s in req_slots:
+                                        if (d, s) not in t_data['pref_slots']:
+                                            match_s = False; break
                                 
-                                # Assign Points based on Candidate Type
-                                if ctype == 'PREF':
-                                    score = SCORE_PERFECT_MATCH if match_d else SCORE_DAY_MATCH
-                                elif ctype == 'RESCUE':
-                                    score = SCORE_RESCUE_MATCH # 60 pts
-                                    if match_d: score += 10
-                                else: # Fallback
-                                    score = SCORE_DEPT_FALLBACK # 40 pts
-                                    if match_d: score += 10
+                                # Base Score
+                                score = 100.0
+                                
+                                # Penalties
+                                if not match_d:
+                                    score -= 25.0 # Day Mismatch (Permanent only, Adjuncts filtered above)
+                                
+                                if not match_s:
+                                    score -= 10.0 # Slot Mismatch
+                                
+                                # Candidate Type Adjustments
+                                if ctype == 'RESCUE':
+                                    score -= 10.0 # Slight penalty for rescue to prefer PREF
+                                elif ctype == 'FALLBACK':
+                                    score -= 30.0 # Larger penalty for fallback
 
                             # Room
                             for room in valid_rooms:
@@ -380,17 +392,24 @@ class CpSatAutoScheduler:
                                 break
                 
                 if curr_plan:
-                    # GREEDY ACCEPTANCE
-                    # If we found a valid plan for a real teacher (Pref or Rescue), take it!
-                    # Do not wait for "better scores". We need assignments.
+                    # GREEDY ACCEPTANCE MODIFIED
+                    # Only accept immediately if it's a PERFECT score (100.0)
+                    # Otherwise, keep searching for a better slot/day.
                     if tid != tba.id:
-                         best_plan = curr_plan
-                         best_score = curr_plan['score']
-                         break 
-
-                    if curr_plan['score'] > best_score:
-                        best_score = curr_plan['score']
-                        best_plan = curr_plan
+                         if curr_plan['score'] >= 100.0: # Perfect match found
+                             best_plan = curr_plan
+                             best_score = curr_plan['score']
+                             break 
+                         
+                         # If not perfect, keep it if it's better than what we have
+                         if curr_plan['score'] > best_score:
+                             best_score = curr_plan['score']
+                             best_plan = curr_plan
+                    else:
+                        # For TBA, just take whatever is best
+                        if curr_plan['score'] > best_score:
+                            best_score = curr_plan['score']
+                            best_plan = curr_plan
 
             # --- COMMIT ---
             if best_plan:
@@ -429,9 +448,29 @@ class CpSatAutoScheduler:
                     assigned_non_tba += len(best_plan['assigns'])
                     t_data = teacher_info[tid]
                     t_data['assigned_count'] += len(best_plan['assigns'])
-                    raw = (best_score / len(group))
-                    norm = min(100, max(0, raw))
-                    t_data['total_score'] += norm
+                    
+                    # Correct Score Calculation: STRICT COMPLIANCE ONLY
+                    # We recalculate the score based purely on Day/Slot match, ignoring scheduler bonuses.
+                    batch_total = 0
+                    for assign in best_plan['assigns']:
+                        # Check Day Match
+                        match_d = all(d in t_data['pref_days'] for d in assign['days'])
+                        
+                        # Check Slot Match
+                        match_s = True
+                        for d in assign['days']:
+                            for s in assign['req_slots']:
+                                if (d, s) not in t_data['pref_slots']:
+                                    match_s = False; break
+                        
+                        # Strict Scoring
+                        item_score = 100.0
+                        if not match_d: item_score -= 25.0
+                        if not match_s: item_score -= 10.0
+                        
+                        batch_total += max(0.0, item_score)
+
+                    t_data['total_score'] += batch_total
             else:
                 logger.warning(f"FAILED to schedule group {base_code}-{group[0].section_number}")
 
@@ -443,16 +482,36 @@ class CpSatAutoScheduler:
         for tid, info in teacher_info.items():
             if tid == tba.id: continue
             
+            # Calculate Target Load (Total sections they requested/were willing to take)
+            # We sum up the quota limits for this teacher across all courses they applied for.
+            target_load = 0
+            for (t_id, c_code), limit in quota_limits.items():
+                if t_id == tid:
+                    target_load += limit
+            
+            # If they didn't apply for anything specific, assume default max (fallback)
+            if target_load == 0: target_load = DEFAULT_MAX_SECTIONS
+
             # Calculation for display
-            avg = info['total_score'] / info['assigned_count'] if info['assigned_count'] > 0 else 0
-            if info['assigned_count'] > 0: all_scores.append(avg)
+            # Formula: (Total Compliance Points) / (Target Load * 100) * 100
+            # This penalizes them for unassigned sections.
+            # Example: Wanted 4, Got 2 Perfect (200 pts). Score = 200 / 400 = 50%.
+            
+            final_score = 0.0
+            if target_load > 0:
+                final_score = (info['total_score'] / (target_load * 100.0)) * 100.0
+            
+            # Cap at 100 just in case
+            final_score = min(100.0, max(0.0, final_score))
+            
+            all_scores.append(final_score)
             
             teacher_scores_list.append({
                 "teacher_id": tid,
                 "initial": info['obj'].initial,
                 "name": info['obj'].name,
                 "assigned_sections": info['assigned_count'],
-                "score_out_of_100": round(avg, 2)
+                "score_out_of_100": round(final_score, 2)
             })
 
         final_mean = sum(all_scores)/len(all_scores) if all_scores else 0

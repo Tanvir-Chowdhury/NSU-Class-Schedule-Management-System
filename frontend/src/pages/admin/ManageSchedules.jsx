@@ -488,8 +488,10 @@ const runAutoSchedule = async () => {
             <div className="font-bold text-slate-900 text-lg">{minScore == null ? '—' : `${minScore.toFixed(2)}/100`}</div>
           </div>
           <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
-            <div className="text-slate-500 text-xs">Variance</div>
-            <div className="font-bold text-slate-900 text-lg">{variance == null ? '—' : variance.toFixed(2)}</div>
+            <div className="text-slate-500 text-xs">Std Dev</div>
+            <div className="font-bold text-slate-900 text-lg">
+              {variance == null ? '—' : Math.sqrt(variance).toFixed(2)}
+            </div>
           </div>
           <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
             <div className="text-slate-500 text-xs">Overall</div>
