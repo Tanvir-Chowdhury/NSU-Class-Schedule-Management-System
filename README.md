@@ -21,11 +21,12 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
     - **Teacher Reassignment:** Allows admins to reassign teachers directly while editing a schedule, with real-time conflict detection.
     - **Auto-Schedule Trigger:** Run the complex scheduling algorithm with one click.
     - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules.
+    - **Advanced Sorting:** Supports multi-column sorting (Shift+Click) for complex data analysis.
     - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules.
 - **Preference Management:**
     - **Approval Workflow:** Teachers submit preferences which enter a "Pending" state. Admins can review, accept, or reject them individually or in bulk. Only accepted preferences are fed into the auto-scheduler.
 - **Resource Management:** Full CRUD capabilities for Rooms, Courses, and Teachers with bulk upload (CSV) and bulk delete options.
-- **Teacher Assignment Overview:** Real-time tracking of faculty assignments and workload.
+- **Teacher Assignment Overview:** Real-time tracking of faculty assignments and workload with instant client-side sorting.
 - **Notification System:**
     - **Broadcast & Targeted Messaging:** Admins can send announcements to "All Users", "All Teachers", "All Students", or specific individuals.
     - **User Search:** When targeting specific users, admins can search across both Student and Teacher databases by name, email, or ID.
@@ -54,9 +55,9 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
     - **My Schedule:** Personalized schedule view showing enrolled courses.
 - **Teacher Features:**
     - **Dashboard:** Overview of assigned courses, total credits, and office hours.
-    - **My Schedule:** Personalized schedule view showing assigned classes.
+    - **My Schedule:** Personalized schedule view showing assigned classes. Strictly filtered to show only courses where the user is the assigned instructor.
     - **Profile Management:** Manage research interests, office hours, and public profile details.
-    - **Contact Info:** "Mail" icons in schedule views allow quick email communication with students or admins.
+    - **Contact Info:** "Mail" icons in schedule views allow quick email communication with students or admins via `mailto:` links.
     - **Faculty Types:** Support for Permanent and Adjunct faculty roles.
 
 ### 5. Google Calendar Integration
@@ -66,6 +67,10 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
     - **Accurate Timing:** Logic correctly handles day patterns (e.g., ST, MW) to ensure events appear on the correct days of the week.
     - **Room Bookings:** Approved one-time room bookings are also synced.
     - **OAuth 2.0:** Secure connection using standard Google authentication.
+- **Advanced Sync Features:**
+    - **Account Selection:** Forces the Google Account Chooser every time, ensuring users can explicitly select which account to sync with (Personal vs. Institutional).
+    - **Clean & Sync:** Automatically detects if the user was previously connected to a different account. It clears all old "NSU Scheduler" events from the previous account before syncing to the new one, preventing duplicates and data leakage.
+    - **Event Tagging:** All events are tagged with `[NSU_Scheduler]` in the description for easy identification and automated cleanup.
 
 ## Tech Stack
 - **Backend:** FastAPI (Python)
@@ -75,28 +80,34 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
 - **Frontend:** React with Tailwind CSS
 
 ## Auto Scheduler Architecture
-The system features an intelligent Auto Scheduler (`backend/services/scheduler.py`) that automates the complex task of assigning teachers to sections and scheduling classes into rooms and time slots.
+The system features a sophisticated **Heuristic Scoring & Rescue Scheduler** (`backend/services/cp_sat_scheduler.py`) that balances teacher preferences, workload distribution, and academic constraints.
 
 ### Algorithm Overview
-1.  **Initialization Phase:**
-    *   **Data Loading:** Fetches all Rooms, Teachers, and Sections. Clears existing schedules to start fresh.
-    *   **Matrix Setup:** Initializes 3D matrices (Entity x Day x Slot) for both Rooms and Instructors to track availability in real-time.
+1.  **Priority-Based Candidate Selection:**
+    *   **Preferred (PREF):** Teachers who explicitly requested a course via the preference system are prioritized.
+    *   **Rescue (RESCUE):** If no preferences exist or are valid, the system identifies "Rescue" candidates—teachers in the same department with **zero or low load** (< 2 sections). This ensures no teacher is left without classes.
+    *   **Fallback (FALLBACK):** If needed, other departmental teachers with available capacity are considered.
+    *   **TBA:** As a last resort, sections are assigned to "TBA" with a massive scoring penalty.
 
-2.  **Round-Robin Teacher Assignment:**
-    *   **Queue Building:** Creates a priority queue for each teacher based on their *accepted* `TeacherPreference`s.
-    *   **Fair Distribution:** Iterates through teachers in a round-robin fashion (Round 1: 1st preference, Round 2: 2nd preference, etc.) to ensure fair allocation of desired courses.
-    *   **Section Matching:** For each preferred course, finds the first unassigned section and attempts to schedule it.
+2.  **Intelligent Scoring System:**
+    *   Every potential schedule assignment is given a **Quality Score** (Base: 100).
+    *   **Penalties:** Points are deducted for mismatches in preferred days (-25), preferred time slots (-10), or using fallback candidates.
+    *   **Bonuses:** Points are added for "Perfect Matches" (e.g., correct floor for the department).
+    *   **Greedy Optimization:** The algorithm immediately accepts a "Perfect Score" (100+) to speed up processing, otherwise it searches for the highest-scoring valid option.
 
-3.  **Smart Slot Selection:**
-    *   **Pattern Generation:** Generates valid time/day options based on course type:
-        *   **Theory:** Combined patterns (ST, MW, RA) across 7 time slots.
-        *   **Lab:** Single days (Sun-Sat) restricted to extended slots (1, 3, 5).
-    *   **Load Balancing:** Dynamically tracks the usage of Theory patterns (ST, MW, RA) and prioritizes the least used pattern for the next assignment. This ensures an even distribution of classes across the week, preventing overcrowding on specific days.
-    *   **Preference Prioritization:** Sorts all possible options to prioritize the teacher's specific `TeacherTimingPreference` (e.g., "Sunday Morning").
+3.  **Advanced Constraint Enforcement:**
+    *   **Adjunct Constraints:** Adjunct faculty are *strictly* limited to their preferred days.
+    *   **Building Zoning:** Automatically attempts to place departments in their designated buildings (e.g., CSE/EEE in SAC, BBA/ENG in NAC).
+    *   **Lab Logic:**
+        *   **Extended Labs (3h):** Restricted to start at slots 1, 3, or 5 (08:00, 11:20, 02:40) to align with standard blocks.
+        *   **Standard Labs (1.5h):** Can be scheduled in any valid slot.
+    *   **Pattern Balancing:** Dynamically tracks usage of Theory patterns (ST, MW, RA) to ensure an even distribution of classes across the week.
     *   **Validation:** Checks `is_slot_valid` for:
         *   Room availability.
         *   Teacher availability.
         *   **Sibling Conflict:** Ensures a Theory section doesn't overlap with its corresponding Lab section (and vice versa).
+
+
 
 4.  **Sibling Consistency:**
     *   **Linked Scheduling:** Immediately after scheduling a section (e.g., Theory), the algorithm attempts to schedule its "sibling" section (e.g., Lab) with the *same teacher*. This guarantees that faculty members keep their Theory and Lab sections together.
