@@ -132,6 +132,7 @@ class CpSatAutoScheduler:
         quota_usage = defaultdict(int)     
         global_usage = defaultdict(int)    
         occupied_slots = set()             
+        pattern_usage = defaultdict(int) # Track usage of ST, MW, RA to balance them
 
         # --- 2. GROUPING ---
         grouped_sections = defaultdict(list)
@@ -258,15 +259,32 @@ class CpSatAutoScheduler:
                 group_options = []
                 possible = True
 
+                # Building Preference Configuration
+                SAC_DEPTS = {'CSE', 'EEE', 'ETE', 'ECE', 'MAT', 'PHY', 'CHE', 'BIO', 'ENV', 'PHR', 'CE', 'ARCH', 'CIT'}
+                NAC_DEPTS = {'BBA', 'ECO', 'ENG', 'BEN', 'HIS', 'PHI', 'SOC', 'LAW', 'POL', 'MGT', 'MKT', 'FIN', 'INB', 'MIS', 'HRM', 'BUS'}
+
                 for sec in group:
                     # Room Filter
                     target_type = self._normalize_type(sec.course.type)
                     valid_rooms = [r for r in rooms if self._normalize_type(r.type) == target_type]
+                    
+                    # Apply Building Constraint based on Department
+                    if group_dept in SAC_DEPTS:
+                        sac_rooms = [r for r in valid_rooms if r.room_number.upper().startswith('SAC')]
+                        if sac_rooms: valid_rooms = sac_rooms
+                    elif group_dept in NAC_DEPTS:
+                        nac_rooms = [r for r in valid_rooms if r.room_number.upper().startswith('NAC')]
+                        if nac_rooms: valid_rooms = nac_rooms
+
                     if not valid_rooms: valid_rooms = rooms 
 
                     sec_opts = []
                     is_extended = sec.course.duration_mode == DurationMode.EXTENDED
-                    patterns = LAB_DAYS if target_type == 'LAB' else THEORY_DAYS.keys()
+                    
+                    # Pattern Selection (Balanced)
+                    patterns = list(LAB_DAYS) if target_type == 'LAB' else list(THEORY_DAYS.keys())
+                    # Sort patterns by usage count (ascending) to ensure equal distribution
+                    patterns.sort(key=lambda p: (pattern_usage[p], self.rng.random()))
 
                     for pattern in patterns:
                         actual_days = [pattern] if pattern in LAB_DAYS else THEORY_DAYS[pattern]
@@ -385,6 +403,9 @@ class CpSatAutoScheduler:
                 for idx, assign in enumerate(best_plan['assigns']):
                     sec = group[idx]
                     sec.teacher_id = tid
+                    
+                    # Update pattern usage to maintain balance
+                    pattern_usage[assign['pattern']] += 1
                     
                     for s_idx in assign['req_slots']:
                         sched = ClassSchedule(
