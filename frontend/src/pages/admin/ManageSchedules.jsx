@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { 
@@ -18,7 +18,8 @@ import {
   Filter,
   ChevronDown,
   Check,
-  Download
+  Download,
+  Edit
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -33,8 +34,26 @@ const TIME_SLOTS = {
   7: "06:00 PM - 07:30 PM"
 };
 
+const LAB_TIMES = {
+  1: "08:00 AM - 11:10 AM",
+  3: "11:20 AM - 02:30 PM",
+  5: "02:40 PM - 05:50 PM"
+};
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'R', 'F', 'A'];
+const DAY_ABBREVIATIONS = {
+  'Sunday': 'S',
+  'Monday': 'M',
+  'Tuesday': 'T',
+  'Wednesday': 'W',
+  'Thursday': 'R',
+  'Friday': 'F',
+  'Saturday': 'A',
+  'ST': 'ST',
+  'MW': 'MW',
+  'RA': 'RA'
+};
 const CALENDAR_TIME_SLOTS = [
   { id: 1, label: '08:00 AM - 09:30 AM' },
   { id: 2, label: '09:40 AM - 11:10 AM' },
@@ -45,13 +64,29 @@ const CALENDAR_TIME_SLOTS = [
   { id: 7, label: '06:00 PM - 07:30 PM' },
 ];
 
+const THEORY_DAYS = [
+  { value: 'ST', label: 'ST (Sun/Tue)' },
+  { value: 'MW', label: 'MW (Mon/Wed)' },
+  { value: 'RA', label: 'RA (Thu)' }
+];
+
+const LAB_DAYS = [
+  { value: 'Sunday', label: 'Sunday' },
+  { value: 'Monday', label: 'Monday' },
+  { value: 'Tuesday', label: 'Tuesday' },
+  { value: 'Wednesday', label: 'Wednesday' },
+  { value: 'Thursday', label: 'Thursday' },
+  { value: 'Friday', label: 'Friday' },
+  { value: 'Saturday', label: 'Saturday' }
+];
+
 const ManageSchedules = () => {
   const [schedules, setSchedules] = useState([]);
   const [allSchedules, setAllSchedules] = useState([]); // For Calendar View
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: 'day', direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState([{ key: 'day', direction: 'asc' }]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -63,14 +98,79 @@ const ManageSchedules = () => {
   const [sections, setSections] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState(null);
   const [newSchedule, setNewSchedule] = useState({
     section_id: '',
     room_id: '',
     day: 'ST',
     time_slot_id: 1,
-    is_friday_booking: false
+    is_friday_booking: false,
+    teacher_id: ''
   });
+  const [addFormCourse, setAddFormCourse] = useState('');
   const [currentSemester, setCurrentSemester] = useState('');
+
+  const [teacherSortConfig, setTeacherSortConfig] = useState({ key: 'initial', direction: 'asc' });
+
+  const handleTeacherSort = (key) => {
+    let direction = 'asc';
+    if (teacherSortConfig.key === key && teacherSortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setTeacherSortConfig({ key, direction });
+  };
+
+  const sortedTeacherAssignments = useMemo(() => {
+    let sorted = [...teacherAssignments];
+    if (teacherSortConfig.key) {
+      sorted.sort((a, b) => {
+        if (a[teacherSortConfig.key] < b[teacherSortConfig.key]) {
+          return teacherSortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (a[teacherSortConfig.key] > b[teacherSortConfig.key]) {
+          return teacherSortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sorted;
+  }, [teacherAssignments, teacherSortConfig]);
+
+  const uniqueCourses = useMemo(() => {
+    const courses = new Set();
+    sections.forEach(s => {
+      if (s.course?.code) courses.add(s.course.code);
+    });
+    return Array.from(courses).sort();
+  }, [sections]);
+
+  const filteredSections = useMemo(() => {
+    if (!addFormCourse) return [];
+    return sections.filter(s => s.course?.code === addFormCourse)
+      .sort((a, b) => a.section_number - b.section_number);
+  }, [sections, addFormCourse]);
+
+  const selectedSection = useMemo(() => {
+    if (!newSchedule.section_id) return null;
+    return sections.find(s => s.id == newSchedule.section_id);
+  }, [sections, newSchedule.section_id]);
+
+  const selectedCourseType = useMemo(() => {
+    if (!addFormCourse) return null;
+    const section = sections.find(s => s.course?.code === addFormCourse);
+    return section?.course?.type;
+  }, [addFormCourse, sections]);
+
+  const availableDays = useMemo(() => {
+    if (!selectedCourseType) return [];
+    return selectedCourseType === 'THEORY' ? THEORY_DAYS : LAB_DAYS;
+  }, [selectedCourseType]);
+
+  const availableTimeSlots = useMemo(() => {
+    if (!selectedCourseType) return TIME_SLOTS;
+    return selectedCourseType === 'THEORY' ? TIME_SLOTS : LAB_TIMES;
+  }, [selectedCourseType]);
 
   // Auto-Scheduler & Calendar View State
   const [isRunning, setIsRunning] = useState(false);
@@ -181,8 +281,8 @@ const ManageSchedules = () => {
         page: pagination.page,
         limit: pagination.limit,
         search: debouncedSearchQuery,
-        sort_by: sortConfig.key,
-        sort_order: sortConfig.direction
+        sort_by: sortConfig.map(s => s.key).join(','),
+        sort_order: sortConfig.map(s => s.direction).join(',')
       };
 
       const response = await axios.get('http://localhost:8000/admin/schedules', {
@@ -376,10 +476,58 @@ const ManageSchedules = () => {
         room_id: '',
         day: 'ST',
         time_slot_id: 1,
-        is_friday_booking: false
+        is_friday_booking: false,
+        teacher_id: ''
       });
     } catch (error) {
-      setStatus({ type: 'error', message: error.response?.data?.detail || 'Failed to add schedule.' });
+      let message = 'Failed to add schedule.';
+      if (error.response?.data?.detail) {
+        if (typeof error.response.data.detail === 'string') {
+          message = error.response.data.detail;
+        } else if (Array.isArray(error.response.data.detail)) {
+          message = error.response.data.detail.map(e => e.msg).join(', ');
+        }
+      }
+      setStatus({ type: 'error', message });
+    }
+  };
+
+  const handleEdit = (schedule) => {
+    setStatus({ type: '', message: '' });
+    setAddFormCourse(schedule.section?.course?.code || '');
+    setEditingSchedule({
+      id: schedule.id,
+      section_id: schedule.section_id,
+      room_id: schedule.room_id,
+      day: schedule.day,
+      time_slot_id: schedule.time_slot_id,
+      is_friday_booking: schedule.day === 'Friday',
+      teacher_id: schedule.section?.teacher_id || ''
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateSchedule = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.put(`http://localhost:8000/admin/schedules/${editingSchedule.id}`, editingSchedule, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setStatus({ type: 'success', message: 'Schedule updated successfully.' });
+      setIsEditModalOpen(false);
+      fetchSchedules();
+      fetchAllSchedules();
+      setEditingSchedule(null);
+    } catch (error) {
+      let message = 'Failed to update schedule.';
+      if (error.response?.data?.detail) {
+        if (typeof error.response.data.detail === 'string') {
+          message = error.response.data.detail;
+        } else if (Array.isArray(error.response.data.detail)) {
+          message = error.response.data.detail.map(e => e.msg).join(', ');
+        }
+      }
+      setStatus({ type: 'error', message });
     }
   };
 
@@ -398,12 +546,57 @@ const ManageSchedules = () => {
     }
   };
 
-  const handleSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
+  const handleSort = (key, event) => {
+    // Capture shiftKey immediately to avoid any potential closure/pooling issues
+    const isShiftPressed = event && event.shiftKey;
+    
+    setSortConfig(prevConfig => {
+      const existingIndex = prevConfig.findIndex(item => item.key === key);
+      
+      // If Shift key is pressed, we append/modify the sort list (Multi-sort)
+      if (isShiftPressed) {
+        if (existingIndex !== -1) {
+          // Toggle direction if exists
+          const newConfig = [...prevConfig];
+          newConfig[existingIndex] = {
+            ...newConfig[existingIndex],
+            direction: newConfig[existingIndex].direction === 'asc' ? 'desc' : 'asc'
+          };
+          return newConfig;
+        } else {
+          // Append new key
+          return [...prevConfig, { key, direction: 'asc' }];
+        }
+      } else {
+        // Single sort mode (default)
+        if (existingIndex !== -1 && prevConfig.length === 1) {
+           // Toggle if it's the only one
+           return [{ key, direction: prevConfig[0].direction === 'asc' ? 'desc' : 'asc' }];
+        } else {
+           // Reset to single new sort
+           return [{ key, direction: 'asc' }];
+        }
+      }
+    });
+  };
+
+  const getSortIcon = (key) => {
+    const index = sortConfig.findIndex(item => item.key === key);
+    if (index === -1) return null;
+    
+    const { direction } = sortConfig[index];
+    const Icon = direction === 'asc' ? ArrowUp : ArrowDown;
+    
+    return (
+      <div className="flex items-center">
+        <Icon className="h-4 w-4" />
+        {sortConfig.length > 1 && (
+          <span className="text-[10px] ml-0.5 font-bold bg-slate-200 rounded-full w-4 h-4 flex items-center justify-center">
+            {index + 1}
+          </span>
+        )}
+      </div>
+    );
   };
 
   const handleSelectAll = (e) => {
@@ -470,30 +663,29 @@ const ManageSchedules = () => {
       const isExtended = schedule.section?.course?.duration_mode === 'EXTENDED';
       
       if (isExtended) {
-        // Find the pair (next slot)
-        const pair = schedules.find(s => 
-          s.id !== schedule.id &&
-          s.section_id === schedule.section_id &&
-          s.day === schedule.day &&
-          s.time_slot_id === schedule.time_slot_id + 1
-        );
-
-        if (pair) {
-          // Merge
-          const startTime = TIME_SLOTS[schedule.time_slot_id]?.split(' - ')[0] || '';
-          const endTime = TIME_SLOTS[pair.time_slot_id]?.split(' - ')[1] || '';
+        // Determine the merged time based on the slot ID
+        const mergedTime = LAB_TIMES[schedule.time_slot_id] || TIME_SLOTS[schedule.time_slot_id];
+        
+        // If this is a start slot (1, 3, 5), try to find and skip the next one
+        if ([1, 3, 5].includes(schedule.time_slot_id)) {
+          const pair = schedules.find(s => 
+            s.id !== schedule.id &&
+            s.section_id === schedule.section_id &&
+            s.day === schedule.day &&
+            s.time_slot_id === schedule.time_slot_id + 1
+          );
           
-          processed.push({
-            ...schedule,
-            isMerged: true,
-            mergedTime: `${startTime} - ${endTime}`,
-            mergedDuration: "3h 10m"
-          });
-          skipIds.add(pair.id);
-        } else {
-          // No pair found on this page, render as is
-          processed.push(schedule);
+          if (pair) {
+            skipIds.add(pair.id);
+          }
         }
+
+        processed.push({
+          ...schedule,
+          isMerged: true,
+          mergedTime: mergedTime,
+          mergedDuration: "3h 10m"
+        });
       } else {
         processed.push(schedule);
       }
@@ -522,7 +714,19 @@ const ManageSchedules = () => {
             Auto Schedule
           </button>
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => {
+              setStatus({ type: '', message: '' });
+              setAddFormCourse('');
+              setNewSchedule({
+                section_id: '',
+                room_id: '',
+                day: 'ST',
+                time_slot_id: 1,
+                is_friday_booking: false,
+                teacher_id: ''
+              });
+              setIsAddModalOpen(true);
+            }}
             className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-sm"
           >
             <CheckCircle className="h-4 w-4 mr-2" />
@@ -706,7 +910,12 @@ const ManageSchedules = () => {
       </div>
       
 
-      <h2 className="text-xl font-bold text-slate-900 mb-4">Schedules</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-slate-900">Schedules</h2>
+        <p className="text-xs text-slate-500">
+          Tip: Hold <span className="font-mono bg-slate-100 px-1 rounded">Shift</span> to sort by multiple columns
+        </p>
+      </div>
       <div className="flex items-center gap-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
         <Search className="h-5 w-5 text-slate-400" />
         <input
@@ -721,7 +930,7 @@ const ManageSchedules = () => {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 select-none">
               <tr>
                 <th className="px-6 py-4 w-4">
                   <input
@@ -732,52 +941,40 @@ const ManageSchedules = () => {
                   />
                 </th>
                 <th className="px-6 py-4">SL</th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('course')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('course', e)}>
                   <div className="flex items-center gap-2">
                     Course
-                    {sortConfig.key === 'course' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('course')}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('section')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('section', e)}>
                   <div className="flex items-center gap-2">
                     Section
-                    {sortConfig.key === 'section' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('section')}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('faculty')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('faculty', e)}>
                   <div className="flex items-center gap-2">
                     Faculty
-                    {sortConfig.key === 'faculty' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('faculty')}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('day')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('day', e)}>
                   <div className="flex items-center gap-2">
                     Time
-                    {sortConfig.key === 'day' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('day')}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('room')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('room', e)}>
                   <div className="flex items-center gap-2">
                     Room
-                    {sortConfig.key === 'room' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('room')}
                   </div>
                 </th>
-                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleSort('availability')}>
+                <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={(e) => handleSort('availability', e)}>
                   <div className="flex items-center gap-2">
                     Availability
-                    {sortConfig.key === 'availability' && (
-                      sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                    )}
+                    {getSortIcon('availability')}
                   </div>
                 </th>
                 <th className="px-6 py-4 text-right">Actions</th>
@@ -827,7 +1024,9 @@ const ManageSchedules = () => {
                     </td>
                     <td className="px-6 py-4 text-slate-600">
                       <div className="flex flex-col">
-                        <span className="font-medium text-slate-900">{schedule.day}</span>
+                        <span className="font-medium text-slate-900">
+                          {DAY_ABBREVIATIONS[schedule.day] || schedule.day}
+                        </span>
                         <span className="text-xs text-slate-500">
                           {schedule.isMerged 
                             ? schedule.mergedTime 
@@ -844,13 +1043,22 @@ const ManageSchedules = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => handleDelete(schedule.id)}
-                        className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleEdit(schedule)}
+                          className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title="Edit"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(schedule.id)}
+                          className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -893,15 +1101,43 @@ const ManageSchedules = () => {
               <table className="w-full text-sm text-left">
                   <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
-                          <th className="px-6 py-4">Initial</th>
-                          <th className="px-6 py-4">Name</th>
-                          <th className="px-6 py-4 text-center">Assigned Sections</th>
-                          <th className="px-6 py-4 text-center">Status</th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleTeacherSort('initial')}>
+                            <div className="flex items-center gap-2">
+                              Initial
+                              {teacherSortConfig.key === 'initial' && (
+                                teacherSortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-slate-100" onClick={() => handleTeacherSort('name')}>
+                            <div className="flex items-center gap-2">
+                              Name
+                              {teacherSortConfig.key === 'name' && (
+                                teacherSortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100" onClick={() => handleTeacherSort('assigned_sections')}>
+                            <div className="flex items-center justify-center gap-2">
+                              Assigned Sections
+                              {teacherSortConfig.key === 'assigned_sections' && (
+                                teacherSortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100" onClick={() => handleTeacherSort('status')}>
+                            <div className="flex items-center justify-center gap-2">
+                              Status
+                              {teacherSortConfig.key === 'status' && (
+                                teacherSortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
+                              )}
+                            </div>
+                          </th>
                           <th className="px-6 py-4 text-center">Contact</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                      {teacherAssignments.map(teacher => (
+                      {sortedTeacherAssignments.map(teacher => (
                           <tr key={teacher.id} className="hover:bg-slate-50/50">
                               <td className="px-6 py-4 font-medium">{teacher.initial}</td>
                               <td className="px-6 py-4">{teacher.name}</td>
@@ -926,7 +1162,7 @@ const ManageSchedules = () => {
                               </td>
                           </tr>
                       ))}
-                      {teacherAssignments.length === 0 && (
+                      {sortedTeacherAssignments.length === 0 && (
                           <tr>
                               <td colSpan="5" className="px-6 py-8 text-center text-slate-500">
                                   No teacher data available.
@@ -953,21 +1189,75 @@ const ManageSchedules = () => {
             </div>
             
             <form onSubmit={handleAddSchedule} className="p-6 space-y-4">
+              {status.type === 'error' && (
+                <div className="p-3 bg-red-50 text-red-700 border border-red-100 rounded-lg flex items-center gap-2 text-sm">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{status.message}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Course</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={addFormCourse}
+                    onChange={(e) => {
+                      setAddFormCourse(e.target.value);
+                      setNewSchedule({...newSchedule, section_id: ''});
+                    }}
+                  >
+                    <option value="">Select Course</option>
+                    {uniqueCourses.map(course => (
+                      <option key={course} value={course}>{course}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Section Number</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                    value={newSchedule.section_id}
+                    onChange={(e) => {
+                      const secId = e.target.value;
+                      const sec = sections.find(s => s.id == secId);
+                      setNewSchedule({
+                        ...newSchedule, 
+                        section_id: secId,
+                        teacher_id: sec?.teacher_id || ''
+                      });
+                    }}
+                    disabled={!addFormCourse}
+                  >
+                    <option value="">Select Section</option>
+                    {filteredSections.map(section => (
+                      <option key={section.id} value={section.id}>
+                        Section {section.section_number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Section</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Faculty</label>
                 <select
-                  required
                   className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
-                  value={newSchedule.section_id}
-                  onChange={(e) => setNewSchedule({...newSchedule, section_id: e.target.value})}
+                  value={newSchedule.teacher_id}
+                  onChange={(e) => setNewSchedule({...newSchedule, teacher_id: e.target.value})}
                 >
-                  <option value="">Select Section</option>
-                  {sections.map(section => (
-                    <option key={section.id} value={section.id}>
-                      {section.course?.code} - Section {section.section_number} ({section.teacher?.initial || 'TBA'})
+                  <option value="">Select Faculty (Optional)</option>
+                  {teacherAssignments.map(teacher => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.initial} - {teacher.name}
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  * Changing this will update the assigned teacher for this section.
+                </p>
               </div>
 
               <div>
@@ -995,17 +1285,12 @@ const ManageSchedules = () => {
                     className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                     value={newSchedule.day}
                     onChange={(e) => setNewSchedule({...newSchedule, day: e.target.value})}
+                    disabled={!addFormCourse}
                   >
-                    <option value="ST">ST (Sun/Tue)</option>
-                    <option value="MW">MW (Mon/Wed)</option>
-                    <option value="RA">RA (Thu)</option>
-                    <option value="Sunday">Sunday</option>
-                    <option value="Monday">Monday</option>
-                    <option value="Tuesday">Tuesday</option>
-                    <option value="Wednesday">Wednesday</option>
-                    <option value="Thursday">Thursday</option>
-                    <option value="Friday">Friday</option>
-                    <option value="Saturday">Saturday</option>
+                    <option value="">Select Day</option>
+                    {availableDays.map(day => (
+                      <option key={day.value} value={day.value}>{day.label}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1016,8 +1301,10 @@ const ManageSchedules = () => {
                     className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
                     value={newSchedule.time_slot_id}
                     onChange={(e) => setNewSchedule({...newSchedule, time_slot_id: parseInt(e.target.value)})}
+                    disabled={!addFormCourse}
                   >
-                    {Object.entries(TIME_SLOTS).map(([id, time]) => (
+                    <option value="">Select Time Slot</option>
+                    {Object.entries(availableTimeSlots).map(([id, time]) => (
                       <option key={id} value={id}>{time}</option>
                     ))}
                   </select>
@@ -1048,6 +1335,161 @@ const ManageSchedules = () => {
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm"
                 >
                   Add Schedule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Schedule Modal */}
+      {isEditModalOpen && editingSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-lg text-slate-800">Edit Schedule</h3>
+              <button 
+                onClick={() => setIsEditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <form onSubmit={handleUpdateSchedule} className="p-6 space-y-4">
+              {status.type === 'error' && (
+                <div className="p-3 bg-red-50 text-red-700 border border-red-100 rounded-lg flex items-center gap-2 text-sm">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{status.message}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Course</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={addFormCourse}
+                    onChange={(e) => {
+                      setAddFormCourse(e.target.value);
+                      setEditingSchedule({...editingSchedule, section_id: ''});
+                    }}
+                  >
+                    <option value="">Select Course</option>
+                    {uniqueCourses.map(course => (
+                      <option key={course} value={course}>{course}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Section Number</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                    value={editingSchedule.section_id}
+                    onChange={(e) => {
+                      const section = sections.find(s => s.id == e.target.value);
+                      setEditingSchedule({
+                        ...editingSchedule, 
+                        section_id: e.target.value,
+                        teacher_id: section?.teacher_id || ''
+                      });
+                    }}
+                    disabled={!addFormCourse}
+                  >
+                    <option value="">Select Section</option>
+                    {filteredSections.map(section => (
+                      <option key={section.id} value={section.id}>
+                        Section {section.section_number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Faculty</label>
+                <select
+                  className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                  value={editingSchedule.teacher_id}
+                  onChange={(e) => setEditingSchedule({...editingSchedule, teacher_id: e.target.value})}
+                >
+                  <option value="">Select Faculty (Optional)</option>
+                  {teacherAssignments.map(teacher => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.initial} - {teacher.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  * Changing this will update the assigned teacher for this section.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Room</label>
+                <select
+                  required
+                  className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                  value={editingSchedule.room_id}
+                  onChange={(e) => setEditingSchedule({...editingSchedule, room_id: e.target.value})}
+                >
+                  <option value="">Select Room</option>
+                  {rooms.map(room => (
+                    <option key={room.id} value={room.id}>
+                      {room.room_number} (Cap: {room.capacity})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Day</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={editingSchedule.day}
+                    onChange={(e) => setEditingSchedule({...editingSchedule, day: e.target.value})}
+                  >
+                    <option value="">Select Day</option>
+                    {availableDays.map(day => (
+                      <option key={day.value} value={day.value}>{day.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Time Slot</label>
+                  <select
+                    required
+                    className="w-full rounded-lg border-slate-200 focus:border-blue-500 focus:ring-blue-500 text-sm"
+                    value={editingSchedule.time_slot_id}
+                    onChange={(e) => setEditingSchedule({...editingSchedule, time_slot_id: parseInt(e.target.value)})}
+                  >
+                    <option value="">Select Time Slot</option>
+                    {Object.entries(availableTimeSlots).map(([id, time]) => (
+                      <option key={id} value={id}>{time}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+                >
+                  Update Schedule
                 </button>
               </div>
             </form>

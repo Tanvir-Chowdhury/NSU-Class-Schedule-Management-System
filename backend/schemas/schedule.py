@@ -33,7 +33,7 @@ class ClassSchedule(ClassScheduleBase):
         from_attributes = True
 
 class ClassScheduleCreate(ClassScheduleBase):
-    pass
+    teacher_id: Optional[int] = None
 
 class PaginatedSchedules(BaseModel):
     items: List[ClassSchedule]

@@ -1,472 +1,361 @@
 from sqlalchemy.orm import Session
-from typing import List, Dict
-import re
+from sqlalchemy import or_, and_
+from typing import List, Dict, Optional, Tuple, Set
 from models.schedule import ClassSchedule, Section
 from models.academic import Room, Course, ClassType, DurationMode
 from models.teacher import Teacher, TeacherPreference, TeacherTimingPreference
-from models.user import User, UserRole
-from core.security import get_password_hash
-from core.constants import TIME_SLOTS, LAB_DAYS, THEORY_DAYS
+from core.constants import TIME_SLOTS, LAB_TIME_SLOTS, LAB_SLOT_MAPPING, THEORY_DAYS, LAB_DAYS
 
-def ensure_tba_teacher(db: Session) -> Teacher:
-    """
-    Ensures that a 'TBA' teacher exists in the database.
-    """
-    tba = db.query(Teacher).filter(Teacher.initial == "TBA").first()
-    if tba:
-        return tba
-    
-    # Create User for TBA
-    user = db.query(User).filter(User.email == "tba@northsouth.edu").first()
-    if not user:
-        user = User(
-            email="tba@northsouth.edu",
-            password_hash=get_password_hash("tba123"),
-            role=UserRole.TEACHER,
-            is_active=True
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        
-    # Create Teacher Profile
-    tba = Teacher(
-        user_id=user.id,
-        initial="TBA",
-        name="To Be Announced",
-        department="General"
-    )
-    db.add(tba)
-    db.commit()
-    db.refresh(tba)
-    return tba
-
-def assign_remaining_to_tba(db: Session):
-    """
-    Assigns all unassigned sections to the 'TBA' teacher.
-    """
-    tba = ensure_tba_teacher(db)
-    
-    # Find all sections with no teacher
-    sections = db.query(Section).filter(Section.teacher_id == None).all()
-    
-    count = 0
-    for section in sections:
-        section.teacher_id = tba.id
-        count += 1
-        
-    if count > 0:
-        print(f"Assigned {count} remaining sections to TBA.")
-    db.commit()
-
-def get_preferred_slots(db: Session, teacher_id: int) -> List[Dict]:
-    """
-    Returns a list of preferred slots for a teacher.
-    Format: [{'day': 'Monday', 'start_time': '08:00 AM', 'end_time': '09:30 AM', 'slot_id': 1}, ...]
-    """
-    if not teacher_id:
-        return []
-    
-    prefs = db.query(TeacherTimingPreference).filter(TeacherTimingPreference.teacher_id == teacher_id).all()
-    preferred_slots = []
-    
-    for pref in prefs:
-        # Map time string to slot ID
-        # This is a simplification. In reality, we'd need to parse times.
-        # Assuming preferences are stored exactly as TIME_SLOTS values or we match them.
-        # Let's try to match start_time with TIME_SLOTS values.
-        for slot_id, time_range in TIME_SLOTS.items():
-            if pref.start_time in time_range: # e.g. "08:00 AM" in "08:00 AM - 09:30 AM"
-                preferred_slots.append({'day': pref.day, 'slot_id': slot_id})
-    
-    return preferred_slots
-
-def assign_teachers_to_sections(db: Session):
-    """
-    Assigns teachers to sections based on accepted preferences.
-    Only assigns to sections that currently have no teacher.
-    Also ensures that if a teacher is assigned to a Theory course, 
-    they are also assigned to the corresponding Lab course (if it exists).
-    """
-    # 1. Fetch all accepted preferences
-    preferences = db.query(TeacherPreference).filter(TeacherPreference.status == 'accepted').all()
-    
-    # 2. Iterate preferences and assign
-    for pref in preferences:
-        # Find unassigned sections for this course
-        sections = db.query(Section).filter(
-            Section.course_id == pref.course_id,
-            Section.teacher_id == None
-        ).limit(pref.section_count).all()
-        
-        for section in sections:
-            section.teacher_id = pref.teacher_id
-            
-            # Check for corresponding Lab/Theory course
-            # Assumption: Lab code is Theory code + 'L' (e.g., CSE115 -> CSE115L)
-            course = section.course
-            target_code = ""
-            if course.code.endswith('L'):
-                # It's a lab, look for theory (remove 'L')
-                target_code = course.code[:-1]
-            else:
-                # It's a theory, look for lab (add 'L')
-                target_code = course.code + 'L'
-            
-            target_course = db.query(Course).filter(Course.code == target_code).first()
-            
-            if target_course:
-                # Find a corresponding section for the target course
-                # Ideally, we match section numbers (Sec 1 Theory -> Sec 1 Lab)
-                target_section = db.query(Section).filter(
-                    Section.course_id == target_course.id,
-                    Section.section_number == section.section_number,
-                    Section.teacher_id == None
-                ).first()
-                
-                if target_section:
-                    target_section.teacher_id = pref.teacher_id
-                    print(f"Auto-assigned {pref.teacher.initial} to {target_code} Section {target_section.section_number} (Linked to {course.code})")
-
-    db.commit()
-    
-    # Assign remaining sections to TBA
-    assign_remaining_to_tba(db)
-
-class ScheduleMatrix:
-    """
-    Helper class to manage the schedule matrix and check for conflicts.
-    """
+class AutoScheduler:
     def __init__(self, db: Session):
         self.db = db
-        self.matrix = self._initialize_matrix()
-        self.teacher_matrix = {} # teacher_id -> day -> slot -> True
-        self._load_existing_schedules()
-
-    def _initialize_matrix(self) -> Dict:
-        """
-        Initializes the schedule matrix with all rooms, days, and slots set to False (Empty).
-        Structure: self.matrix[room_id][day][slot] = boolean
-        """
-        matrix = {}
-        rooms = self.db.query(Room).all()
+        self.rooms = []
+        self.instructors = []
+        self.sections = []
+        self.room_matrix = {} # room_id -> day -> slot -> bool
+        self.instructor_matrix = {} # teacher_id -> day -> slot -> bool
+        self.scheduled_section_ids = set()
+        self.pattern_usage = {'ST': 0, 'MW': 0, 'RA': 0} # Track usage for load balancing
         
-        # Days to include in the matrix (excluding Friday as it is blocked)
-        # We include all LAB_DAYS which contains all days except Friday
-        days = LAB_DAYS 
+        # Load Data
+        self._load_data()
+        self._init_matrices()
 
-        for room in rooms:
-            matrix[room.id] = {}
-            for day in days:
-                matrix[room.id][day] = {}
-                for slot in TIME_SLOTS.keys():
-                    matrix[room.id][day][slot] = False # False means Empty/Available
-        return matrix
+    def _load_data(self):
+        self.rooms = self.db.query(Room).all()
+        self.instructors = self.db.query(Teacher).all()
+        self.sections = self.db.query(Section).all()
+        
+        # Clear existing schedules
+        self.db.query(ClassSchedule).delete()
+        
+        # Reset teacher assignments
+        for section in self.sections:
+            section.teacher_id = None
+        self.db.flush()
 
-    def _load_existing_schedules(self):
-        """
-        Fetches all existing ClassSchedule entries from the DB and marks them as True (Occupied).
-        Also populates teacher_matrix.
-        """
-        schedules = self.db.query(ClassSchedule).join(Section).all()
-        for schedule in schedules:
-            # Handle combined days (ST, MW, RA)
-            days_to_mark = []
-            if schedule.day in THEORY_DAYS:
-                days_to_mark = THEORY_DAYS[schedule.day]
+    def _init_matrices(self):
+        # Initialize Room Matrix
+        for room in self.rooms:
+            self.room_matrix[room.id] = {}
+            for day in LAB_DAYS:
+                self.room_matrix[room.id][day] = {slot: False for slot in TIME_SLOTS.keys()}
+
+        # Initialize Instructor Matrix
+        for instructor in self.instructors:
+            self.instructor_matrix[instructor.id] = {}
+            for day in LAB_DAYS:
+                self.instructor_matrix[instructor.id][day] = {slot: False for slot in TIME_SLOTS.keys()}
+
+    def _check_matrix_availability(self, matrix, entity_id, day, slot, is_lab):
+        if entity_id not in matrix: return True 
+        if day not in matrix[entity_id]: return False
+
+        slots_to_check = []
+        if is_lab:
+            # Lab Slot L overlaps Theory Slots defined in MAPPING
+            if slot in LAB_SLOT_MAPPING:
+                slots_to_check = LAB_SLOT_MAPPING[slot]
             else:
-                days_to_mark = [schedule.day]
+                return False
+        else:
+            # Theory Slot T overlaps itself (and implicitly Lab slots that cover it)
+            slots_to_check = [slot]
 
-            for day in days_to_mark:
-                # Mark Room
-                if schedule.room_id in self.matrix and day in self.matrix[schedule.room_id]:
-                    if schedule.time_slot_id in self.matrix[schedule.room_id][day]:
-                        self.matrix[schedule.room_id][day][schedule.time_slot_id] = True
-                
-                # Mark Teacher
-                if schedule.section.teacher_id:
-                    tid = schedule.section.teacher_id
-                    if tid not in self.teacher_matrix:
-                        self.teacher_matrix[tid] = {}
-                    if day not in self.teacher_matrix[tid]:
-                        self.teacher_matrix[tid][day] = {}
-                    self.teacher_matrix[tid][day][schedule.time_slot_id] = True
-
-    def is_slot_available(self, room_id: int, day: str, slot: int) -> bool:
-        """
-        Checks if a specific slot is available.
-        Returns False if the slot is occupied or if the day is Friday (implicitly handled by not being in matrix).
-        """
-        if day == 'Friday':
-            return False
-        
-        if room_id not in self.matrix:
-            return False
-        if day not in self.matrix[room_id]:
-            return False
-        if slot not in self.matrix[room_id][day]:
-            return False
-            
-        return not self.matrix[room_id][day][slot]
-
-    def is_teacher_available(self, teacher_id: int, day: str, slot: int) -> bool:
-        if not teacher_id:
-            return True
-        if teacher_id in self.teacher_matrix:
-            if day in self.teacher_matrix[teacher_id]:
-                if slot in self.teacher_matrix[teacher_id][day]:
-                    return False
+        for s in slots_to_check:
+            if matrix[entity_id][day].get(s, True): # Default True (Occupied)
+                return False
         return True
 
-    def mark_slot_occupied(self, room_id: int, day: str, slot: int):
+    def is_slot_valid(self, section: Section, teacher_id: Optional[int], room: Room, days: List[str], time_slot: int, is_lab: bool) -> bool:
+        # 1. Check Room & Instructor Availability for ALL days in the pattern
+        for day in days:
+            # Check Room
+            if not self._check_matrix_availability(self.room_matrix, room.id, day, time_slot, is_lab):
+                return False
+            
+            # Check Instructor
+            if teacher_id and not self._check_matrix_availability(self.instructor_matrix, teacher_id, day, time_slot, is_lab):
+                return False
+
+        # 2. Sibling Conflict Check
+        # Ensure this section does not overlap with its sibling (Theory vs Lab)
+        course_code = section.course.code
+        sibling_code = course_code[:-1] if course_code.endswith('L') else course_code + 'L'
+        
+        # Find sibling section (same section number)
+        # We check the DB for existing schedules for the sibling.
+        # Since we flush after each schedule, DB query should return recently added schedules.
+        
+        sibling_schedules = self.db.query(ClassSchedule).join(Section).join(Course).filter(
+            Course.code == sibling_code,
+            Section.section_number == section.section_number
+        ).all()
+
+        for sched in sibling_schedules:
+            # Check overlap
+            # Sched Day vs Current Days
+            sched_days = THEORY_DAYS.get(sched.day, [sched.day])
+            
+            for d1 in days:
+                for d2 in sched_days:
+                    if d1 == d2:
+                        # Same day, check time overlap
+                        # Get occupied slots for the sibling
+                        sibling_slots = []
+                        is_sibling_lab = sched.section.course.type == ClassType.LAB
+                        if is_sibling_lab:
+                            sibling_slots = LAB_SLOT_MAPPING.get(sched.time_slot_id, [])
+                        else:
+                            sibling_slots = [sched.time_slot_id]
+                        
+                        # Get occupied slots for current
+                        current_slots = []
+                        if is_lab:
+                            current_slots = LAB_SLOT_MAPPING.get(time_slot, [])
+                        else:
+                            current_slots = [time_slot]
+                            
+                        # Intersection check
+                        if set(sibling_slots) & set(current_slots):
+                            return False
+
+        return True
+
+    def mark_occupied(self, teacher_id: Optional[int], room_id: int, days: List[str], slot: int, is_lab: bool):
+        slots_to_mark = []
+        if is_lab:
+            slots_to_mark = LAB_SLOT_MAPPING.get(slot, [])
+        else:
+            slots_to_mark = [slot]
+
+        for day in days:
+            for s in slots_to_mark:
+                self.room_matrix[room_id][day][s] = True
+                if teacher_id:
+                    self.instructor_matrix[teacher_id][day][s] = True
+
+    def _normalize_time(self, time_str: str) -> str:
         """
-        Marks a specific slot as occupied in the matrix.
+        Normalize time string to HH:MM AM/PM format.
+        Handles '8:00 AM' -> '08:00 AM'
         """
-        if room_id in self.matrix and day in self.matrix[room_id] and slot in self.matrix[room_id][day]:
-            self.matrix[room_id][day][slot] = True
-
-    def mark_teacher_occupied(self, teacher_id: int, day: str, slot: int):
-        if not teacher_id:
-            return
-        if teacher_id not in self.teacher_matrix:
-            self.teacher_matrix[teacher_id] = {}
-        if day not in self.teacher_matrix[teacher_id]:
-            self.teacher_matrix[teacher_id][day] = {}
-        self.teacher_matrix[teacher_id][day][slot] = True
-
-def get_room_level(room_number: str) -> int:
-    """
-    Extracts the numeric part of the room number to determine the floor level.
-    e.g., 'SAC202' -> 202, 'NAC305' -> 305.
-    """
-    match = re.search(r'\d+', room_number)
-    if match:
-        return int(match.group())
-    return 9999 # Fallback
-
-def schedule_extended_labs(db: Session, matrix: ScheduleMatrix):
-    """
-    Pass 1: Schedule Extended Labs (2 consecutive slots).
-    - Fetches all Sections where Course.type='LAB' AND duration_mode='EXTENDED'.
-    - Iterates through LAB type Rooms only.
-    - Finds 2 Consecutive Empty Slots on any allowed day.
-    - Assigns the section to those slots.
-    """
-    # Fetch sections that need scheduling
-    # Note: In a real scenario, we might want to filter out sections that are already scheduled.
-    # For this implementation, we assume we are scheduling unscheduled sections.
-    sections = db.query(Section).join(Course).filter(
-        Course.type == ClassType.LAB,
-        Course.duration_mode == DurationMode.EXTENDED
-    ).all()
-
-    # Fetch LAB rooms
-    lab_rooms = db.query(Room).filter(Room.type == ClassType.LAB).all()
-    # Sort rooms by level (e.g. 200s before 300s)
-    lab_rooms.sort(key=lambda r: get_room_level(r.room_number))
-    
-    scheduled_count = 0
-    
-    for section in sections:
-        # Check if already scheduled (basic check)
-        if db.query(ClassSchedule).filter(ClassSchedule.section_id == section.id).first():
-            continue
-
-        assigned = False
-        
-        # Get preferred slots for this teacher
-        preferred_slots = get_preferred_slots(db, section.teacher_id)
-        
-        # Create a list of slots to try: Preferred first, then others
-        # For Extended Labs, we need 2 consecutive slots.
-        # We'll iterate all days/slots, but prioritize those matching preferences.
-        
-        # Strategy: 
-        # 1. Try to find a room/time that matches preference.
-        # 2. If not found, try any room/time.
-        
-        # To implement this cleanly without duplicating loops, we can just iterate normally
-        # but maybe sort the days/slots? Or just keep it simple:
-        # If we want to strictly enforce "Try Preference First", we should iterate preferences first.
-        # But preferences are specific (Day + Slot).
-        
-        # Let's try to iterate all valid (Day, Slot1, Slot2) combinations.
-        # Sort them so preferred ones come first.
-        
-        valid_combinations = [] # (day, slot1, slot2)
-        sorted_slots = sorted(TIME_SLOTS.keys())
-        
-        for day in LAB_DAYS:
-            for i in range(len(sorted_slots) - 1):
-                slot1 = sorted_slots[i]
-                slot2 = sorted_slots[i+1]
-                
-                score = 0
-                # Check if this combination matches any preference
-                for pref in preferred_slots:
-                    if pref['day'] == day and (pref['slot_id'] == slot1 or pref['slot_id'] == slot2):
-                        score += 10 # High priority
-                
-                valid_combinations.append({'day': day, 'slot1': slot1, 'slot2': slot2, 'score': score})
-        
-        # Sort by score descending
-        valid_combinations.sort(key=lambda x: x['score'], reverse=True)
-
-        for room in lab_rooms:
-            if assigned:
-                break
+        try:
+            parts = time_str.split()
+            time_part = parts[0]
+            meridiem = parts[1] if len(parts) > 1 else ""
             
-            for combo in valid_combinations:
-                day = combo['day']
-                slot1 = combo['slot1']
-                slot2 = combo['slot2']
-                
-                if matrix.is_slot_available(room.id, day, slot1) and \
-                   matrix.is_slot_available(room.id, day, slot2) and \
-                   matrix.is_teacher_available(section.teacher_id, day, slot1) and \
-                   matrix.is_teacher_available(section.teacher_id, day, slot2):
-                    
-                    # Assign slots
-                    sched1 = ClassSchedule(
-                        section_id=section.id,
-                        room_id=room.id,
-                        day=day,
-                        time_slot_id=slot1,
-                        availability=room.capacity
-                    )
-                    sched2 = ClassSchedule(
-                        section_id=section.id,
-                        room_id=room.id,
-                        day=day,
-                        time_slot_id=slot2,
-                        availability=room.capacity
-                    )
-                    
-                    db.add(sched1)
-                    db.add(sched2)
-                    
-                    # Update Matrix
-                    matrix.mark_slot_occupied(room.id, day, slot1)
-                    matrix.mark_slot_occupied(room.id, day, slot2)
-                    matrix.mark_teacher_occupied(section.teacher_id, day, slot1)
-                    matrix.mark_teacher_occupied(section.teacher_id, day, slot2)
-                    
-                    assigned = True
-                    scheduled_count += 1
+            if ':' in time_part:
+                h, m = time_part.split(':')
+                return f"{int(h):02d}:{m} {meridiem}".strip()
+            return time_str
+        except:
+            return time_str
+
+    def _is_preferred(self, teacher_id: int, days: List[str], slot_id: int, is_lab: bool) -> bool:
+        prefs = self.db.query(TeacherTimingPreference).filter(TeacherTimingPreference.teacher_id == teacher_id).all()
+        if not prefs:
+            return False
+            
+        # Get start time string for this slot
+        slot_time_str = ""
+        if is_lab:
+            slot_time_str = LAB_TIME_SLOTS.get(slot_id, "")
+        else:
+            slot_time_str = TIME_SLOTS.get(slot_id, "")
+            
+        if not slot_time_str:
+            return False
+            
+        # Extract start time "08:00 AM" from "08:00 AM - 09:30 AM"
+        current_start_time = slot_time_str.split(" - ")[0]
+        normalized_current = self._normalize_time(current_start_time)
+        
+        for pref in prefs:
+            # Check if day matches any of the days in the pattern
+            # Preference day might be "Sunday", "Monday" etc.
+            # Current days is a list ['Sunday', 'Tuesday']
+            
+            day_match = False
+            for d in days:
+                if d == pref.day:
+                    day_match = True
                     break
-        
-        if not assigned:
-            print(f"Warning: Could not schedule Extended Lab Section {section.id} ({section.course.code})")
             
-    db.commit()
-    return scheduled_count
+            if day_match:
+                # Check time match with normalization
+                normalized_pref = self._normalize_time(pref.start_time)
+                if normalized_pref == normalized_current:
+                    return True
+                    
+        return False
 
-def schedule_standard_courses(db: Session, matrix: ScheduleMatrix):
-    """
-    Pass 2: Schedule Standard Courses (Theory & Special Labs).
-    - Fetches all Sections where duration_mode='STANDARD'.
-    - Theory Logic:
-        - Try to fit into THEORY rooms.
-        - Must match Patterns: ST (Sun+Tue), MW (Mon+Wed), or RA (Thu+Sat) at the same time slot.
-        - ECE Dept -> SAC Rooms (SAC%)
-        - Other Depts -> NAC Rooms (NAC%)
-    - Special Lab Logic:
-        - Try to fit into LAB rooms.
-        - Must match Patterns: ST (Sun+Tue), MW (Mon+Wed), or RA (Thu+Sat) at the same time slot.
-    """
-    sections = db.query(Section).join(Course).filter(
-        Course.duration_mode == DurationMode.STANDARD
-    ).all()
+    def schedule_section(self, section: Section, teacher_id: Optional[int]) -> bool:
+        if section.id in self.scheduled_section_ids:
+            return True
 
-    # Separate rooms by type
-    theory_rooms = db.query(Room).filter(Room.type == ClassType.THEORY).all()
-    lab_rooms = db.query(Room).filter(Room.type == ClassType.LAB).all()
-
-    # Sort rooms by level (e.g. 200s before 300s)
-    theory_rooms.sort(key=lambda r: get_room_level(r.room_number))
-    lab_rooms.sort(key=lambda r: get_room_level(r.room_number))
-
-    scheduled_count = 0
-
-    for section in sections:
-        # Check if already scheduled
-        if db.query(ClassSchedule).filter(ClassSchedule.section_id == section.id).first():
-            continue
-
-        assigned = False
+        is_lab = section.course.type == ClassType.LAB
         
-        # Determine target rooms based on course type and teacher department
-        if section.course.type == ClassType.THEORY:
-            # Filter rooms based on department
-            teacher = section.teacher
-            if teacher and teacher.department == "ECE":
-                # ECE gets SAC rooms
-                target_rooms = [r for r in theory_rooms if r.room_number.startswith("SAC")]
-            else:
-                # Others get NAC rooms (or anything not SAC if NAC doesn't exist, but assuming NAC exists)
-                target_rooms = [r for r in theory_rooms if r.room_number.startswith("NAC")]
-                
-            # Fallback: If no specific rooms found (e.g. no SAC rooms), use all theory rooms
-            if not target_rooms:
-                target_rooms = theory_rooms
-        else: # Special Labs
-            target_rooms = lab_rooms
+        # Filter Rooms by Type
+        valid_rooms = [r for r in self.rooms if r.type == section.course.type]
+        if not valid_rooms:
+            print(f"No rooms found for {section.course.code} (Type: {section.course.type})")
+            return False
 
-        # Get preferred slots
-        preferred_slots = get_preferred_slots(db, section.teacher_id)
+        # Determine Slots and Patterns to try
+        # If Teacher has preferences, try them first
+        preferred_options = []
+        other_options = []
 
-        # Generate all valid pattern/slot combinations and sort by preference
-        valid_combinations = [] # (pattern, day1, day2, slot)
-        
-        for pattern, days in THEORY_DAYS.items():
-            day1, day2 = days[0], days[1]
-            for slot in TIME_SLOTS.keys():
-                score = 0
-                for pref in preferred_slots:
-                    if (pref['day'] == day1 or pref['day'] == day2) and pref['slot_id'] == slot:
-                        score += 10 # High priority for matching preference
-                valid_combinations.append({'pattern': pattern, 'day1': day1, 'day2': day2, 'slot': slot, 'score': score})
-        
-        valid_combinations.sort(key=lambda x: x['score'], reverse=True)
-
-        for room in target_rooms:
-            if assigned:
-                break
+        # Generate all possible options
+        all_options = []
+        if is_lab:
+            # Lab: Single Days, Slots 1-3
+            for day in LAB_DAYS:
+                for slot in LAB_TIME_SLOTS.keys():
+                    all_options.append({'days': [day], 'slot': slot, 'pattern': day})
+        else:
+            # Theory: Patterns, Slots 1-7
+            # Sort patterns by usage (least used first) to balance load
+            sorted_patterns = sorted(THEORY_DAYS.items(), key=lambda item: self.pattern_usage.get(item[0], 0))
             
-            for combo in valid_combinations:
-                pattern = combo['pattern']
-                day1 = combo['day1']
-                day2 = combo['day2']
-                slot = combo['slot']
-                
-                if matrix.is_slot_available(room.id, day1, slot) and \
-                   matrix.is_slot_available(room.id, day2, slot) and \
-                   matrix.is_teacher_available(section.teacher_id, day1, slot) and \
-                   matrix.is_teacher_available(section.teacher_id, day2, slot):
-                    
-                    # Assign slots - Single entry with pattern
-                    sched = ClassSchedule(
-                        section_id=section.id,
-                        room_id=room.id,
-                        day=pattern, # 'ST', 'MW', or 'RA'
-                        time_slot_id=slot,
-                        availability=room.capacity
-                    )
-                    
-                    db.add(sched)
-                    
-                    # Update Matrix
-                    matrix.mark_slot_occupied(room.id, day1, slot)
-                    matrix.mark_slot_occupied(room.id, day2, slot)
-                    matrix.mark_teacher_occupied(section.teacher_id, day1, slot)
-                    matrix.mark_teacher_occupied(section.teacher_id, day2, slot)
-                    
-                    assigned = True
-                    scheduled_count += 1
-                    break
-        
-        if not assigned:
-            print(f"Warning: Could not schedule Standard Section {section.id} ({section.course.code})")
+            for pattern, days in sorted_patterns:
+                for slot in TIME_SLOTS.keys():
+                    all_options.append({'days': days, 'slot': slot, 'pattern': pattern})
 
-    db.commit()
-    return scheduled_count
+        # Sort/Filter based on preferences
+        # CRITICAL: We must prioritize teacher preferences first.
+        # If a teacher has a preferred slot, we try that first.
+        # If not (or if preferred slots are full), we fall back to the load-balanced 'other_options'.
+        if teacher_id:
+            for opt in all_options:
+                if self._is_preferred(teacher_id, opt['days'], opt['slot'], is_lab):
+                    preferred_options.append(opt)
+                else:
+                    other_options.append(opt)
+        else:
+            # For TBA (No Teacher), we strictly follow the load-balanced order (ST, MW, RA based on usage)
+            other_options = all_options
+
+        # Combine: Preferences > Load Balanced Options
+        # This ensures that:
+        # 1. Teachers get their preferred times if available.
+        # 2. If no preference/TBA, we pick the day pattern that is least used (Load Balancing).
+        final_options = preferred_options + other_options
+
+        # Try to find a valid slot
+        for opt in final_options:
+            days = opt['days']
+            slot = opt['slot']
+            pattern = opt['pattern']
+            
+            for room in valid_rooms:
+                if self.is_slot_valid(section, teacher_id, room, days, slot, is_lab):
+                    # Found a slot!
+                    # 1. Assign Teacher
+                    section.teacher_id = teacher_id
+                    self.db.add(section)
+                    
+                    # 2. Create Schedule
+                    slots_to_create = []
+                    if is_lab:
+                        slots_to_create = LAB_SLOT_MAPPING.get(slot, [slot])
+                    else:
+                        slots_to_create = [slot]
+
+                    for s_id in slots_to_create:
+                        sched = ClassSchedule(
+                            section_id=section.id,
+                            room_id=room.id,
+                            day=pattern, # 'ST', 'MW', or 'RA'
+                            time_slot_id=s_id,
+                            availability=room.capacity
+                        )
+                        self.db.add(sched)
+                    
+                    # 3. Update Matrix
+                    self.mark_occupied(teacher_id, room.id, days, slot, is_lab)
+                    
+                    # 4. Update Pattern Usage (for Theory)
+                    if not is_lab and pattern in self.pattern_usage:
+                        self.pattern_usage[pattern] += 1
+
+                    # 5. Mark Scheduled
+                    self.scheduled_section_ids.add(section.id)
+                    
+                    # Flush to make it visible for sibling checks
+                    self.db.flush()
+                    return True
+        
+        print(f"Failed to schedule {section.course.code} Sec {section.section_number}")
+        return False
+
+    def find_sibling_section(self, section: Section) -> Optional[Section]:
+        course_code = section.course.code
+        sibling_code = course_code[:-1] if course_code.endswith('L') else course_code + 'L'
+        
+        # Find in self.sections
+        for s in self.sections:
+            if s.course.code == sibling_code and s.section_number == section.section_number:
+                return s
+        return None
+
+    def run(self):
+        print("Starting AutoScheduler...")
+        
+        # Step 3: Round-Robin Assignment
+        # Build queues
+        teacher_queues = {}
+        for teacher in self.instructors:
+            prefs = self.db.query(TeacherPreference).filter(
+                TeacherPreference.teacher_id == teacher.id,
+                TeacherPreference.status == 'accepted'
+            ).all()
+            
+            queue = []
+            for pref in prefs:
+                # Find sections of this course
+                # We just put the Course object in the queue
+                for _ in range(pref.section_count):
+                    queue.append(pref.course)
+            
+            teacher_queues[teacher.id] = queue
+
+        if not teacher_queues:
+            max_rounds = 0
+        else:
+            max_rounds = max(len(q) for q in teacher_queues.values())
+
+        print(f"Max rounds: {max_rounds}")
+
+        for r in range(max_rounds):
+            for teacher in self.instructors:
+                queue = teacher_queues.get(teacher.id, [])
+                if r < len(queue):
+                    course = queue[r]
+                    
+                    # Find an unassigned section of this course
+                    candidate_section = None
+                    for s in self.sections:
+                        if s.course_id == course.id and s.teacher_id is None:
+                            candidate_section = s
+                            break
+                    
+                    if candidate_section:
+                        # Try to schedule
+                        if self.schedule_section(candidate_section, teacher.id):
+                            # Handle Sibling
+                            sibling = self.find_sibling_section(candidate_section)
+                            if sibling and sibling.teacher_id is None:
+                                self.schedule_section(sibling, teacher.id)
+
+        # Step 4: TBA Handling
+        print("Assigning remaining sections to TBA...")
+        for section in self.sections:
+            if section.id not in self.scheduled_section_ids:
+                self.schedule_section(section, None)
+
+        # Step 5: Save
+        self.db.commit()
+        print("Scheduling Complete.")
+        return len(self.scheduled_section_ids)

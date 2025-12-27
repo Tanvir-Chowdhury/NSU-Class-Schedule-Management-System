@@ -80,8 +80,24 @@ def get_admin_notifications(
     items = []
     for n in notifications:
         count = 0
+        recipient_names = []
         if n.type == NotificationType.SPECIFIC:
-            count = db.query(NotificationRecipient).filter(NotificationRecipient.notification_id == n.id).count()
+            recipients = db.query(User).join(NotificationRecipient).filter(NotificationRecipient.notification_id == n.id).all()
+            count = len(recipients)
+            
+            for r in recipients:
+                name = r.email # Default fallback
+                if r.role == UserRole.TEACHER and r.teacher_profile:
+                    name = r.teacher_profile.name
+                elif r.role == UserRole.STUDENT and r.student_profile:
+                    name = r.student_profile.name
+                elif r.role == UserRole.ADMIN and r.admin_profile:
+                    name = r.admin_profile.name
+                
+                if name:
+                    recipient_names.append(name)
+                else:
+                    recipient_names.append(r.email)
         
         items.append(NotificationSchema(
             id=n.id,
@@ -90,7 +106,8 @@ def get_admin_notifications(
             type=n.type,
             created_at=n.created_at,
             sender_email=n.sender.email if n.sender else "Unknown",
-            recipient_count=count
+            recipient_count=count,
+            recipient_names=recipient_names
         ))
 
     return {"items": items, "total": total, "page": page, "size": limit}

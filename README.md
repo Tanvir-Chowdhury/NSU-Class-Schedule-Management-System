@@ -7,17 +7,21 @@ This project is a Class Schedule Management System designed to help manage and o
 
 ### 1. Intelligent Auto-Scheduling
 The core of the system is a sophisticated auto-scheduling algorithm that optimizes resource allocation:
-- **Floor-Level Prioritization:** Automatically fills lower-floor rooms (e.g., 200-level) before moving to higher floors to ensure efficient building utilization.
-- **Department-Specific Allocation:** Intelligently assigns ECE courses to SAC rooms and other departments to NAC rooms.
+- **Round-Robin Allocation:** Distributes courses fairly among teachers based on their preferences, preventing one teacher from getting all prime slots.
+- **Sibling Section Linking:** Automatically attempts to schedule the Lab section immediately after the Theory section for the same teacher, ensuring continuity.
 - **Teacher Preference Integration:** Prioritizes teacher's preferred time slots and ensures they are assigned to the courses they requested.
-- **Lab/Theory Consistency:** Guarantees that if a teacher is assigned a Theory section, they are also linked to the corresponding Lab section.
+- **Strict Constraint Enforcement:** Adheres to strict academic rules (Theory on ST/MW/RA, Labs on single days, specific Lab time slots).
 - **Conflict Resolution:** Automatically handles "TBA" assignments for unassigned sections and falls back to random valid slots if preferences cannot be met.
 
 ### 2. Comprehensive Admin Management
 - **Unified Scheduling Interface:** A consolidated "Manage Schedules" page that offers:
+    - **Smart Form Logic:** New "Add/Edit Schedule" forms with cascading dropdowns (Course -> Section -> Faculty) to prevent errors.
+    - **Dynamic Filtering:** Automatically filters "Day" and "Time Slot" options based on the course type (e.g., only showing Lab slots for Lab courses).
+    - **Constraint Enforcement:** Strict validation ensures Theory courses are on ST/MW/RA days and Labs are on single days with valid extended time slots (1, 3, 5).
+    - **Teacher Reassignment:** Allows admins to reassign teachers directly while editing a schedule, with real-time conflict detection.
     - **Auto-Schedule Trigger:** Run the complex scheduling algorithm with one click.
-    - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules, supporting complex day patterns (ST, MW, RA).
-    - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules (downloads complete datasets).
+    - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules.
+    - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules.
 - **Preference Management:**
     - **Approval Workflow:** Teachers submit preferences which enter a "Pending" state. Admins can review, accept, or reject them individually or in bulk. Only accepted preferences are fed into the auto-scheduler.
 - **Resource Management:** Full CRUD capabilities for Rooms, Courses, and Teachers with bulk upload (CSV) and bulk delete options.
@@ -74,30 +78,32 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
 The system features an intelligent Auto Scheduler (`backend/services/scheduler.py`) that automates the complex task of assigning teachers to sections and scheduling classes into rooms and time slots.
 
 ### Algorithm Overview
-1.  **Teacher Assignment Phase:**
-    *   **Input:** `TeacherPreference` records (Course, Number of Sections).
-    *   **Process:** The system iterates through accepted teacher preferences and assigns teachers to unassigned sections of the requested courses.
-    *   **Goal:** Ensure faculty members are assigned to the courses they requested, respecting their section limits.
-    *   **TBA Handling:** Any sections remaining unassigned after this phase are linked to a placeholder "TBA" teacher to ensure they are still scheduled.
+1.  **Initialization Phase:**
+    *   **Data Loading:** Fetches all Rooms, Teachers, and Sections. Clears existing schedules to start fresh.
+    *   **Matrix Setup:** Initializes 3D matrices (Entity x Day x Slot) for both Rooms and Instructors to track availability in real-time.
 
-2.  **Initialization Phase:**
-    *   **Schedule Matrix:** A 3D matrix (Room x Day x TimeSlot) is initialized to track room availability.
-    *   **Teacher Matrix:** A similar structure tracks teacher availability to prevent double-booking.
-    *   **Existing Schedules:** Any pre-existing schedules are loaded into the matrices to ensure new schedules don't conflict.
+2.  **Round-Robin Teacher Assignment:**
+    *   **Queue Building:** Creates a priority queue for each teacher based on their *accepted* `TeacherPreference`s.
+    *   **Fair Distribution:** Iterates through teachers in a round-robin fashion (Round 1: 1st preference, Round 2: 2nd preference, etc.) to ensure fair allocation of desired courses.
+    *   **Section Matching:** For each preferred course, finds the first unassigned section and attempts to schedule it.
 
-3.  **Lab Scheduling Phase (Priority):**
-    *   **Why First?** Labs require specific room types (`LAB`) and longer durations (`EXTENDED` mode, typically 2 consecutive slots), making them harder to fit.
-    *   **Process:**
-        *   Iterate through all sections with `EXTENDED` duration mode.
-        *   Filter for rooms of type `LAB`.
-        *   **Department Logic:** ECE labs are prioritized for SAC building rooms.
-        *   **Optimization:** Sort rooms by floor level (ascending) to fill lower floors (e.g., 200-level) first.
-        *   **Teacher Preferences:** Check if the assigned teacher has a specific timing preference (`TeacherTimingPreference`). Try to schedule in that slot first.
-        *   **Conflict Check:** Ensure the room is free, the teacher is free, and the slot is valid for extended duration.
-        *   **Fallback:** If preferred slots are full, try other available slots.
+3.  **Smart Slot Selection:**
+    *   **Pattern Generation:** Generates valid time/day options based on course type:
+        *   **Theory:** Combined patterns (ST, MW, RA) across 7 time slots.
+        *   **Lab:** Single days (Sun-Sat) restricted to extended slots (1, 3, 5).
+    *   **Load Balancing:** Dynamically tracks the usage of Theory patterns (ST, MW, RA) and prioritizes the least used pattern for the next assignment. This ensures an even distribution of classes across the week, preventing overcrowding on specific days.
+    *   **Preference Prioritization:** Sorts all possible options to prioritize the teacher's specific `TeacherTimingPreference` (e.g., "Sunday Morning").
+    *   **Validation:** Checks `is_slot_valid` for:
+        *   Room availability.
+        *   Teacher availability.
+        *   **Sibling Conflict:** Ensures a Theory section doesn't overlap with its corresponding Lab section (and vice versa).
 
-4.  **Theory Scheduling Phase:**
-    *   **Process:**
+4.  **Sibling Consistency:**
+    *   **Linked Scheduling:** Immediately after scheduling a section (e.g., Theory), the algorithm attempts to schedule its "sibling" section (e.g., Lab) with the *same teacher*. This guarantees that faculty members keep their Theory and Lab sections together.
+
+5.  **TBA Fallback:**
+    *   **Cleanup:** Any sections that couldn't be assigned to a specific teacher (due to conflicts or lack of preferences) are processed in a final pass.
+    *   **Assignment:** These are scheduled into any remaining valid slots with `Teacher: TBA` to ensure the class is offered even without an assigned instructor.
         *   Iterate through all sections with `STANDARD` duration mode.
         *   Filter for rooms of type `THEORY`.
         *   **Department Logic:** ECE courses are prioritized for SAC rooms; others for NAC.
@@ -351,6 +357,10 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - Slot 5: 02:40 PM - 04:10 PM
             - Slot 6: 04:20 PM - 05:50 PM
             - Slot 7: 06:00 PM - 07:30 PM
+        - **Lab Time Slots (Merged):**
+            - Slot L1 (1+2): 08:00 AM - 11:10 AM
+            - Slot L2 (3+4): 11:20 AM - 02:30 PM
+            - Slot L3 (5+6): 02:40 PM - 05:50 PM
         - **Special Labs:** `CSE115L`, `CSE215L`, `CSE225L` follow theory time slot system timings.
     - **CSV Import Logic:**
         - **Auto-Detection:**
@@ -364,13 +374,15 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Scheduling Strategy:**
             - **Pass 1 (Extended Labs):**
                 - Targets `LAB` courses with `EXTENDED` duration.
-                - Finds 2 consecutive empty slots in `LAB` rooms.
+                - **Slot Logic:** Uses predefined merged slots (1+2, 3+4, 5+6) to ensure labs fit into 3h 10m blocks.
+                - **Conflict Check:** Ensures no overlap with existing schedules and respects teacher availability.
                 - Assigns once per week.
             - **Pass 2 (Standard Courses):**
                 - Targets `THEORY` courses and `SPECIAL LABS` (`STANDARD` duration).
                 - **Theory:** Fits into `THEORY` rooms.
                 - **Special Labs:** Fits into `LAB` rooms.
                 - **Pattern Matching:** Assigns to `ST` (Sun+Tue), `MW` (Mon+Wed), or `RA` (Thu+Sat) at the same time slot.
+                - **Sibling Conflict Check:** Prevents scheduling a Theory course (e.g., CSE115) at the same time as its corresponding Lab (e.g., CSE115L) to avoid student conflicts.
 - **AI Chatbot (RAG):**
     - **Integration:** Uses Pinecone for vector storage and Mistral AI for embeddings and chat completion.
     - **Real-time Synchronization:**

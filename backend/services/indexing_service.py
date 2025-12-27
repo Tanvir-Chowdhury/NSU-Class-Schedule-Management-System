@@ -7,6 +7,8 @@ from models.student import Student
 from models.admin import Admin
 from models.schedule import Section, ClassSchedule
 from services.rag_service import upsert_data_bulk
+from core.database import SessionLocal
+from core.constants import TIME_SLOTS
 import json
 
 def index_all_data(db: Session):
@@ -180,5 +182,54 @@ def index_all_data(db: Session):
     # Perform bulk upsert
     if items_to_index:
         upsert_data_bulk(items_to_index)
+
+def reindex_schedules_background():
+    """
+    Background task to re-index all schedules.
+    Creates its own DB session to avoid blocking the main request.
+    """
+    print("Starting background schedule re-indexing...")
+    db = SessionLocal()
+    try:
+        schedules = db.query(ClassSchedule).join(Section).join(Course).join(Room).outerjoin(Teacher, Section.teacher_id == Teacher.id).all()
+        
+        rag_items = []
+        for schedule in schedules:
+            time_str = TIME_SLOTS.get(schedule.time_slot_id, "Unknown Time")
+            teacher_initial = schedule.section.teacher.initial if schedule.section.teacher else "TBA"
+            
+            rag_data = {
+                "type": "schedule",
+                "course_code": schedule.section.course.code,
+                "course_title": schedule.section.course.title,
+                "section_number": schedule.section.section_number,
+                "teacher_initial": teacher_initial,
+                "room_number": schedule.room.room_number,
+                "day": schedule.day,
+                "time": time_str,
+                "description": f"Class: {schedule.section.course.code} - {schedule.section.course.title} (Section {schedule.section.section_number}). Teacher: {teacher_initial}. Room: {schedule.room.room_number}. Time: {schedule.day} {time_str}."
+            }
+            
+            rag_items.append({
+                "vector_id": f"schedule_{schedule.id}",
+                "data_text": json.dumps(rag_data),
+                "metadata": {
+                    "type": "schedule", 
+                    "course_code": schedule.section.course.code,
+                    "teacher_initial": teacher_initial,
+                    "room_number": schedule.room.room_number,
+                    "day": schedule.day
+                }
+            })
+            
+        if rag_items:
+            upsert_data_bulk(rag_items)
+            
+        print(f"Background re-indexing complete. Processed {len(rag_items)} schedules.")
+        
+    except Exception as e:
+        print(f"Error in background re-indexing: {e}")
+    finally:
+        db.close()
 
     print("Full database indexing completed.")

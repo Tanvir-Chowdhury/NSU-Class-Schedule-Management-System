@@ -35,7 +35,13 @@ def get_google_flow():
 
 def get_google_auth_url():
     flow = get_google_flow()
-    auth_url, _ = flow.authorization_url(prompt='consent')
+    # prompt='consent select_account' forces the user to select an account and approve permissions
+    # access_type='offline' ensures we get a refresh token
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent select_account'
+    )
     return auth_url
 
 def get_credentials_from_code(code: str):

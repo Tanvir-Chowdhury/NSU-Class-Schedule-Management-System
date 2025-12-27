@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
-import { Search, CheckCircle, XCircle, MessageSquare, Loader2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Search, CheckCircle, XCircle, MessageSquare, Loader2, ToggleLeft, ToggleRight, Mail } from 'lucide-react';
 
 const ManagePreferences = () => {
   const { token } = useAuth();
@@ -333,7 +333,19 @@ const ManagePreferences = () => {
                       <td className="px-6 py-4">{pref.course?.code} - {pref.course?.title}</td>
                       <td className="px-6 py-4">{pref.section_count}</td>
                       <td className="px-6 py-4">{pref.course?.credits * pref.section_count}</td>
-                      <td className="px-6 py-4 text-center"><MessageSquare className="mx-auto text-slate-400" /></td>
+                      <td className="px-6 py-4 text-center">
+                        {(pref.teacher?.email || pref.teacher?.contact_details) ? (
+                          <a 
+                            href={`mailto:${pref.teacher?.email || pref.teacher?.contact_details}`} 
+                            className="inline-flex items-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" 
+                            title={`Email ${pref.teacher?.email || pref.teacher?.contact_details}`}
+                          >
+                            <Mail className="h-4 w-4" />
+                          </a>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-center">
                         {pref.status === 'pending' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-100">Pending</span>}
                         {pref.status === 'accepted' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-100">Accepted</span>}

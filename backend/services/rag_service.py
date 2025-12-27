@@ -58,7 +58,9 @@ def upsert_data_bulk(items: list):
         index = pc.Index(PINECONE_INDEX_NAME)
         
         # Process in batches
-        BATCH_SIZE = 50 # Mistral might have limits on batch size
+        # Increased batch size for faster processing
+        # Mistral typically handles larger batches, and Pinecone supports up to 1000 vectors
+        BATCH_SIZE = 100 
         
         for i in range(0, len(items), BATCH_SIZE):
             batch_items = items[i:i + BATCH_SIZE]
@@ -181,6 +183,13 @@ def trigger_rag_bulk_delete(background_tasks: BackgroundTasks, vector_ids: list)
     Triggers the RAG bulk deletion as a background task.
     """
     background_tasks.add_task(delete_data_bulk, vector_ids)
+
+def trigger_rag_bulk_update(background_tasks: BackgroundTasks, items: list):
+    """
+    Triggers the RAG bulk update as a background task.
+    items: List of dicts with keys 'vector_id', 'data_text', 'metadata'
+    """
+    background_tasks.add_task(upsert_data_bulk, items)
 
 # Legacy support for existing calls (if any)
 def upsert_user_data(user_id: int, role: str, data_text: str):

@@ -12,6 +12,25 @@ TIME_SLOTS = {
     7: "06:00 PM - 07:30 PM"
 }
 
+# Lab Time Slots (Merged Standard Slots)
+# Slot 1+2, 3+4, 5+6
+# Keys are the STARTING Theory Slot ID (1, 3, 5)
+LAB_TIME_SLOTS = {
+    1: "08:00 AM - 11:10 AM", # Covers Slot 1 & 2
+    3: "11:20 AM - 02:30 PM", # Covers Slot 3 & 4
+    5: "02:40 PM - 05:50 PM"  # Covers Slot 5 & 6
+}
+
+# Mapping from Lab Slot Index (1,3,5) to Standard Slot IDs
+# 1 -> [1, 2]
+# 3 -> [3, 4]
+# 5 -> [5, 6]
+LAB_SLOT_MAPPING = {
+    1: [1, 2],
+    3: [3, 4],
+    5: [5, 6]
+}
+
 SPECIAL_LAB_CODES = ['CSE115L', 'CSE215L', 'CSE225L']
 
 LAB_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday']

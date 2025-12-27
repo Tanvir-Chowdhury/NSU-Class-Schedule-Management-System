@@ -309,19 +309,30 @@ const ManageNotifications = () => {
                           {notification.title}
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            notification.type === 'ALL' ? 'bg-purple-100 text-purple-800' :
-                            notification.type === 'ALL_TEACHERS' ? 'bg-blue-100 text-blue-800' :
-                            notification.type === 'ALL_STUDENTS' ? 'bg-green-100 text-green-800' :
-                            'bg-slate-100 text-slate-800'
-                          }`}>
-                            {notification.type === 'ALL' && <Users className="h-3 w-3 mr-1" />}
-                            {notification.type === 'ALL_TEACHERS' && <User className="h-3 w-3 mr-1" />}
-                            {notification.type === 'ALL_STUDENTS' && <User className="h-3 w-3 mr-1" />}
-                            {notification.type === 'SPECIFIC' 
-                              ? `${notification.recipient_count} Users`
-                              : notification.type.replace('ALL_', 'All ').replace('ALL', 'Everyone')}
-                          </span>
+                          {notification.type === 'SPECIFIC' ? (
+                             <div className="flex flex-col items-start gap-1">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                  {notification.recipient_count} Users
+                                </span>
+                                {notification.recipient_names?.length > 0 && (
+                                  <span className="text-xs text-slate-500 max-w-[200px] truncate" title={notification.recipient_names.join(', ')}>
+                                    {notification.recipient_names.join(', ')}
+                                  </span>
+                                )}
+                             </div>
+                          ) : (
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              notification.type === 'ALL' ? 'bg-purple-100 text-purple-800' :
+                              notification.type === 'ALL_TEACHERS' ? 'bg-blue-100 text-blue-800' :
+                              notification.type === 'ALL_STUDENTS' ? 'bg-green-100 text-green-800' :
+                              'bg-slate-100 text-slate-800'
+                            }`}>
+                              {notification.type === 'ALL' && <Users className="h-3 w-3 mr-1" />}
+                              {notification.type === 'ALL_TEACHERS' && <User className="h-3 w-3 mr-1" />}
+                              {notification.type === 'ALL_STUDENTS' && <User className="h-3 w-3 mr-1" />}
+                              {notification.type.replace('ALL_', 'All ').replace('ALL', 'Everyone')}
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-slate-600 max-w-xs truncate" title={notification.message}>
                           {notification.message}

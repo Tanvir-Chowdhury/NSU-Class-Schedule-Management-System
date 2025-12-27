@@ -16,6 +16,7 @@ class Notification(NotificationBase):
     created_at: datetime
     sender_email: Optional[str] = None
     recipient_count: Optional[int] = 0 # Helper for display
+    recipient_names: Optional[List[str]] = None # Helper for display
     is_read: bool = False
 
     class Config:
