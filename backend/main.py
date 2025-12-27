@@ -1,11 +1,9 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from api import auth, admin, booking, calendar, profile, chat, settings, academic, admin_preferences, dashboard, student
+from contextlib import asynccontextmanager
+from api import auth, admin, booking, calendar, profile, chat, settings, academic, admin_preferences, dashboard, student, notification, public
 from core.database import engine, Base, SessionLocal
-
-# --- Import 'public' here ---
-from api import auth, admin, booking, calendar, profile, chat, settings, academic, admin_preferences, dashboard, public
 
 # Import all models to ensure relationships are registered
 from models.user import User, UserRole
@@ -14,27 +12,16 @@ from models.student import Student
 from models.admin import Admin
 from models.settings import SystemSetting
 from models.verification import VerificationCode
+from models.chat import ChatMessage
+from models.notification import Notification, NotificationRecipient
 from core.security import get_password_hash
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Class Schedule Management System")
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"], # Add frontend origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
     db = SessionLocal()
     try:
         admin_email = "tanvir.chowdhury.us@gmail.com"
@@ -68,10 +55,24 @@ def startup_event():
         print(f"Startup Error: {e}")
     finally:
         db.close()
-        role=UserRole.ADMIN,
-        is_active=True
-        
     
+    yield
+    # Shutdown logic (if any)
+
+app = FastAPI(title="Class Schedule Management System", lifespan=lifespan)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"], # Add frontend origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.include_router(auth.router, tags=["Authentication"])
 app.include_router(admin.router)
 app.include_router(booking.router)
@@ -84,6 +85,7 @@ app.include_router(admin_preferences.router)
 app.include_router(dashboard.router)
 app.include_router(student.router)
 app.include_router(public.router) 
+app.include_router(notification.router)
 
 @app.get("/")
 def read_root():

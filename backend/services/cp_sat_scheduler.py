@@ -295,8 +295,14 @@ class CpSatAutoScheduler:
                             if not all(d in t_data['pref_days'] for d in actual_days):
                                 continue 
                         
-                        for slot in range(1, 8):
-                            if is_extended and slot == 7: continue
+                        # Determine valid start slots
+                        # Extended (3h) labs must start at 1, 3, or 5 to match standard blocks (8-11, 11-2, 2-5)
+                        # Standard (1.5h) labs can start at any slot 1-7
+                        valid_start_slots = [1, 3, 5] if is_extended else range(1, 8)
+
+                        for slot in valid_start_slots:
+                            if is_extended and slot == 7: continue # Redundant for [1,3,5] but safe
+
 
                             # Availability
                             blocked = False

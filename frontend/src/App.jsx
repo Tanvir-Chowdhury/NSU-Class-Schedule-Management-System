@@ -12,6 +12,8 @@ import ManageRooms from './pages/admin/ManageRooms';
 import ManageSchedules from './pages/admin/ManageSchedules';
 import ManagePreferences from './pages/admin/ManagePreferences';
 import ManageBookings from './pages/admin/ManageBookings';
+import ManageNotifications from './pages/admin/ManageNotifications';
+import Notifications from './pages/shared/Notifications';
 import TeacherDashboard from './pages/teacher/Dashboard';
 import TeacherSettings from './pages/teacher/Settings';
 import TeacherPreferences from './pages/teacher/Preferences';
@@ -98,6 +100,14 @@ function App() {
             </ProtectedRoute>
           } />
 
+          <Route path="/admin/notifications" element={
+            <ProtectedRoute roles={['ADMIN']}>
+              <Layout role="admin">
+                <ManageNotifications />
+              </Layout>
+            </ProtectedRoute>
+          } />
+
           <Route path="/admin/bookings" element={
             <ProtectedRoute roles={['ADMIN']}>
               <Layout role="admin">
@@ -165,11 +175,26 @@ function App() {
             </ProtectedRoute>
           } />
 
+          <Route path="/teacher/notifications" element={
+            <ProtectedRoute roles={['TEACHER']}>
+              <Layout role="teacher">
+                <Notifications />
+              </Layout>
+            </ProtectedRoute>
+          } />
+
           {/* Student Routes */}
           <Route path="/student/dashboard" element={
             <ProtectedRoute roles={['STUDENT']}>
               <Layout role="student">
                 <StudentDashboard />
+              </Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/student/notifications" element={
+            <ProtectedRoute roles={['STUDENT']}>
+              <Layout role="student">
+                <Notifications />
               </Layout>
             </ProtectedRoute>
           } />

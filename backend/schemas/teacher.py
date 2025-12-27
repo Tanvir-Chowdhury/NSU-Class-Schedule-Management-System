@@ -76,6 +76,7 @@ class TeacherCreate(TeacherBase):
 class Teacher(TeacherBase):
     id: int
     user_id: int
+    email: Optional[str] = None
     office_hours: List[OfficeHour] = []
     timing_preferences: List[TeacherTimingPreference] = []
 

@@ -6,6 +6,7 @@ from models.user import User, UserRole
 from models.schedule import Section, ClassSchedule
 from models.academic import Course
 from models.teacher import Teacher
+from models.chat import ChatMessage
 
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "csms-rag")
 
@@ -32,6 +33,11 @@ def generate_response(query: str, current_user: User, db: Session) -> str:
     Enforces privacy rules and system prompts.
     Handles 'Plan my courses' intent.
     """
+    # Save User Message
+    user_msg = ChatMessage(user_id=current_user.id, role="user", content=query)
+    db.add(user_msg)
+    db.commit()
+
     # 0. Intent Detection: Course Planning
     if "plan my courses" in query.lower() or "plan courses" in query.lower():
         sections_text = get_available_sections_text(db)
@@ -55,7 +61,14 @@ def generate_response(query: str, current_user: User, db: Session) -> str:
                 model="mistral-large-latest",
                 messages=messages,
             )
-            return chat_response.choices[0].message.content
+            response_content = chat_response.choices[0].message.content
+            
+            # Save Assistant Message
+            ai_msg = ChatMessage(user_id=current_user.id, role="assistant", content=response_content)
+            db.add(ai_msg)
+            db.commit()
+            
+            return response_content
         except Exception as e:
             print(f"Mistral planning error: {e}")
             return "I'm sorry, I encountered an error while planning your courses."
@@ -133,7 +146,14 @@ def generate_response(query: str, current_user: User, db: Session) -> str:
             model="mistral-large-latest",
             messages=messages,
         )
-        return chat_response.choices[0].message.content
+        response_content = chat_response.choices[0].message.content
+        
+        # Save Assistant Message
+        ai_msg = ChatMessage(user_id=current_user.id, role="assistant", content=response_content)
+        db.add(ai_msg)
+        db.commit()
+        
+        return response_content
     except Exception as e:
         print(f"Mistral chat error: {e}")
         return "I'm sorry, I encountered an error while generating the response."

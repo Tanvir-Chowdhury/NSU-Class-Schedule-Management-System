@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { 
   LayoutDashboard, 
@@ -18,13 +19,16 @@ import {
   GraduationCap,
   User,
   ListChecks,
+  Megaphone,
+  Bell
 } from 'lucide-react';
 
 const Layout = ({ children, role = 'student' }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, token } = useAuth();
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -32,6 +36,31 @@ const Layout = ({ children, role = 'student' }) => {
     logout();
     navigate('/login');
   };
+
+  useEffect(() => {
+    const fetchUnreadCount = async () => {
+      if (!token || role === 'admin') return; // Admin has different notification system
+      try {
+        const response = await axios.get('http://localhost:8000/notifications/unread-count', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setUnreadCount(response.data.count);
+      } catch (error) {
+        console.error("Failed to fetch unread count", error);
+      }
+    };
+
+    fetchUnreadCount();
+    const interval = setInterval(fetchUnreadCount, 30000); // Poll every 30s
+    
+    const handleUpdate = () => fetchUnreadCount();
+    window.addEventListener('notificationUpdate', handleUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notificationUpdate', handleUpdate);
+    };
+  }, [token, role]);
 
   const navigation = {
     admin: [
@@ -41,11 +70,13 @@ const Layout = ({ children, role = 'student' }) => {
       { name: 'Manage Rooms', href: '/admin/rooms', icon: MapPin },
       { name: 'Manage Preferences', href: '/admin/preferences', icon: ListChecks },
       { name: 'Manage Bookings', href: '/admin/bookings', icon: Bookmark },
+      { name: 'Manage Notifications', href: '/admin/notifications', icon: Megaphone },
       { name: 'Manage Schedules', href: '/admin/schedules', icon: Clock },
       { name: 'Settings', href: '/admin/settings', icon: Settings },
     ],
     teacher: [
       { name: 'Dashboard', href: '/teacher/dashboard', icon: LayoutDashboard },
+      { name: 'Notifications', href: '/teacher/notifications', icon: Bell },
       { name: 'My Schedule', href: '/teacher/schedule', icon: Calendar },
       { name: 'Book Room', href: '/teacher/book-room', icon: MapPin },
       { name: 'Edit Profile', href: '/teacher/edit-profile', icon: User },
@@ -54,6 +85,7 @@ const Layout = ({ children, role = 'student' }) => {
     ],
     student: [
       { name: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard },
+      { name: 'Notifications', href: '/student/notifications', icon: Bell },
       { name: 'My Schedule', href: '/student/schedule', icon: Calendar },
       { name: 'Course Planner', href: '/student/planner', icon: BookOpen },
       { name: 'Book Room', href: '/student/book-room', icon: MapPin },
@@ -105,7 +137,13 @@ const Layout = ({ children, role = 'student' }) => {
                     ${isActive ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-500'}
                   `} />
                   {item.name}
-                  {isActive && <ChevronRight className="ml-auto h-4 w-4 text-indigo-600" />}
+                  {item.name === 'Notifications' && unreadCount > 0 ? (
+                    <span className="ml-auto flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-red-500 text-white text-xs font-bold animate-pulse shadow-sm">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  ) : (
+                    isActive && <ChevronRight className="ml-auto h-4 w-4 text-indigo-600" />
+                  )}
                 </Link>
               );
             })}

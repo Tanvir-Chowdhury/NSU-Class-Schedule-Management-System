@@ -3,12 +3,19 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { GraduationCap, Users, Settings, Search, ChevronLeft, ChevronRight, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
+import { GraduationCap, Users, Settings, Search, ChevronLeft, ChevronRight, ArrowRight, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 
 const Home = () => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'day', direction: 'asc' });
   const [currentSemester, setCurrentSemester] = useState('Fall 2025');
+  const [courses, setCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0
+  });
 
   useEffect(() => {
     const fetchSemester = async () => {
@@ -24,19 +31,36 @@ const Home = () => {
     fetchSemester();
   }, []);
 
-  // Mock data for the course list
-  const courses = [
-    { sl: 1, code: 'ACT201', sec: 1, faculty: 'AHU', time: '11:20 AM - 12:50 PM RA', room: 'NAC510', seats: 0 },
-    { sl: 2, code: 'ACT201', sec: 2, faculty: 'ARM', time: '01:00 PM - 02:30 PM ST', room: 'NAC310', seats: 0 },
-    { sl: 3, code: 'ACT201', sec: 3, faculty: 'ARM', time: '02:40 PM - 04:10 PM ST', room: 'NAC206', seats: 0 },
-    { sl: 4, code: 'ACT201', sec: 4, faculty: 'ASY', time: '09:40 AM - 11:10 AM MW', room: 'NAC206', seats: 0 },
-    { sl: 5, code: 'ACT201', sec: 5, faculty: 'ASY', time: '11:20 AM - 12:50 PM MW', room: 'NAC410', seats: 0 },
-    { sl: 6, code: 'ACT201', sec: 6, faculty: 'AWKM', time: '02:40 PM - 04:10 PM RA', room: 'NAC410', seats: 5 },
-    { sl: 7, code: 'ACT201', sec: 7, faculty: 'FI', time: '01:00 PM - 02:30 PM MW', room: 'NAC307', seats: 0 },
-    { sl: 8, code: 'ACT201', sec: 8, faculty: 'FI', time: '02:40 PM - 04:10 PM MW', room: 'NAC307', seats: 0 },
-    { sl: 9, code: 'ACT201', sec: 9, faculty: 'HAS', time: '04:20 PM - 05:50 PM ST', room: 'NAC510', seats: 0 },
-    { sl: 10, code: 'ACT201', sec: 10, faculty: 'IAC', time: '09:40 AM - 11:10 AM ST', room: 'NAC411', seats: 0 },
-  ];
+  const fetchCourses = async () => {
+    setLoading(true);
+    try {
+      const params = {
+        page: pagination.page,
+        limit: pagination.limit,
+        search: searchQuery,
+        sort_by: sortConfig.key,
+        sort_order: sortConfig.direction
+      };
+      
+      const response = await axios.get('http://localhost:8000/public/schedules', { params });
+      setCourses(response.data.items);
+      setPagination(prev => ({
+        ...prev,
+        total: response.data.total
+      }));
+    } catch (error) {
+      console.error('Failed to fetch courses', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      fetchCourses();
+    }, 300);
+    return () => clearTimeout(debounceTimer);
+  }, [searchQuery, pagination.page, sortConfig]);
 
   // Handle sorting
   const handleSort = (key) => {
@@ -47,27 +71,28 @@ const Home = () => {
     setSortConfig({ key, direction });
   };
 
-  // Filter and Sort courses
-  const filteredCourses = courses
-    .filter(course => 
-      course.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      course.faculty.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      course.room.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-    .sort((a, b) => {
-      if (!sortConfig.key) return 0;
-      
-      const aValue = a[sortConfig.key];
-      const bValue = b[sortConfig.key];
-      
-      if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1;
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1;
-      }
-      return 0;
-    });
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= Math.ceil(pagination.total / pagination.limit)) {
+      setPagination(prev => ({ ...prev, page: newPage }));
+    }
+  };
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    const date = new Date();
+    date.setHours(parseInt(hours), parseInt(minutes));
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getDayAbbreviation = (day) => {
+    const map = {
+      'Sunday': 'Su', 'Monday': 'Mo', 'Tuesday': 'Tu', 'Wednesday': 'We', 
+      'Thursday': 'Th', 'Friday': 'Fr', 'Saturday': 'Sa',
+      'ST': 'ST', 'MW': 'MW', 'RA': 'RA'
+    };
+    return map[day] || day;
+  };
 
   const scrollToCourses = () => {
     const element = document.getElementById('course-list');
@@ -235,30 +260,47 @@ const Home = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredCourses.length > 0 ? (
-                  filteredCourses.map((course) => (
-                    <tr key={course.sl} className="hover:bg-slate-50/80 transition-colors group">
-                      <td className="px-4 md:px-6 py-4 text-center text-slate-400 font-medium">{course.sl}</td>
+                {loading ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
+                      <div className="flex justify-center items-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                        <span className="ml-2">Loading schedules...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : courses.length > 0 ? (
+                  courses.map((schedule, index) => (
+                    <tr key={schedule.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <td className="px-4 md:px-6 py-4 text-center text-slate-400 font-medium">
+                        {(pagination.page - 1) * pagination.limit + index + 1}
+                      </td>
                       <td className="px-4 md:px-6 py-4">
                           <span className="font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-md group-hover:bg-white group-hover:shadow-sm transition-all border border-transparent group-hover:border-slate-200">
-                              {course.code}
+                              {schedule.section?.course?.code}
                           </span>
                       </td>
-                      <td className="px-4 md:px-6 py-4 text-center text-slate-600 font-medium">{course.sec}</td>
+                      <td className="px-4 md:px-6 py-4 text-center text-slate-600 font-medium">
+                        {schedule.section?.section_number}
+                      </td>
                       <td className="px-4 md:px-6 py-4 text-center">
                           <div className="inline-flex items-center justify-center h-8 w-12 rounded-md bg-indigo-50 text-indigo-700 font-medium text-xs border border-indigo-100">
-                              {course.faculty}
+                              {schedule.section?.teacher?.initial || 'TBA'}
                           </div>
                       </td>
-                      <td className="px-4 md:px-6 py-4 text-slate-600 whitespace-nowrap">{course.time}</td>
-                      <td className="px-4 md:px-6 py-4 text-slate-600 font-medium">{course.room}</td>
+                      <td className="px-4 md:px-6 py-4 text-slate-600 whitespace-nowrap">
+                        {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)} {getDayAbbreviation(schedule.day)}
+                      </td>
+                      <td className="px-4 md:px-6 py-4 text-slate-600 font-medium">
+                        {schedule.room?.room_number}
+                      </td>
                       <td className="px-4 md:px-6 py-4 text-center">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              course.seats > 0 
+                              schedule.availability > 0 
                               ? 'bg-green-50 text-green-700 border border-green-100' 
                               : 'bg-red-50 text-red-700 border border-red-100'
                           }`}>
-                              {course.seats > 0 ? `${course.seats} Seats` : 'Full'}
+                              {schedule.availability > 0 ? `${schedule.availability} Seats` : 'Full'}
                           </span>
                       </td>
                     </tr>
@@ -276,13 +318,27 @@ const Home = () => {
 
           {/* Pagination */}
           <div className="px-6 py-4 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between">
-            <p className="text-sm text-slate-500">Showing <span className="font-medium text-slate-900">{filteredCourses.length}</span> results</p>
+            <p className="text-sm text-slate-500">
+              Showing <span className="font-medium text-slate-900">
+                {courses.length > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0}
+              </span> to <span className="font-medium text-slate-900">
+                {Math.min(pagination.page * pagination.limit, pagination.total)}
+              </span> of <span className="font-medium text-slate-900">{pagination.total}</span> results
+            </p>
             <div className="flex items-center space-x-2">
-                <button className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 transition-colors shadow-md">
-                <ChevronLeft className="h-4 w-4" />
+                <button 
+                  onClick={() => handlePageChange(pagination.page - 1)}
+                  disabled={pagination.page === 1}
+                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 transition-colors shadow-md"
+                >
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
-                <button className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 transition-colors shadow-md">
-                <ChevronRight className="h-4 w-4" />
+                <button 
+                  onClick={() => handlePageChange(pagination.page + 1)}
+                  disabled={pagination.page >= Math.ceil(pagination.total / pagination.limit)}
+                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 transition-colors shadow-md"
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </button>
             </div>
           </div>

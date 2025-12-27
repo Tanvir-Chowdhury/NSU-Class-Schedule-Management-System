@@ -25,6 +25,10 @@ class Teacher(Base):
     preferences = relationship("TeacherPreference", back_populates="teacher", cascade="all, delete-orphan")
     timing_preferences = relationship("TeacherTimingPreference", back_populates="teacher", cascade="all, delete-orphan")
 
+    @property
+    def email(self):
+        return self.user.email if self.user else None
+
     def __repr__(self):
         return f"<Teacher(initial='{self.initial}', name='{self.name}')>"
 

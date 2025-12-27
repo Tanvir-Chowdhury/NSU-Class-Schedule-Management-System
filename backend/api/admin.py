@@ -7,19 +7,21 @@ import json
 
 from core.database import get_db
 from core.security import get_admin_user, get_password_hash
-from models.academic import Room, Course
+from models.academic import Room, Course, DurationMode, ClassType
 from models.user import User, UserRole
 from models.teacher import Teacher
+from models.student import Student
 from models.admin import Admin
+from models.notification import Notification, NotificationRecipient, NotificationType
 from models.schedule import ClassSchedule, Section
 from schemas.academic import RoomCreate, Room as RoomSchema, CourseCreate, Course as CourseSchema, PaginatedCourses, PaginatedRooms
 from schemas.teacher import TeacherCreate, Teacher as TeacherSchema, TeacherUpdate, PaginatedTeachers
 from schemas.user import User as UserSchema
 from schemas.schedule import ClassSchedule as ClassScheduleSchema, PaginatedSchedules, ClassScheduleCreate, Section as SectionSchema
 from services.csv_service import parse_course_csv, parse_teacher_csv, parse_room_csv
-from services.scheduler import ScheduleMatrix, schedule_extended_labs, schedule_standard_courses, assign_teachers_to_sections
-from services.rag_service import trigger_rag_update, trigger_rag_delete, trigger_rag_bulk_delete
-from services.indexing_service import index_all_data
+from services.scheduler import AutoScheduler
+from services.rag_service import trigger_rag_update, trigger_rag_delete, trigger_rag_bulk_delete, trigger_rag_bulk_update
+from services.indexing_service import index_all_data, reindex_schedules_background
 from core.constants import TIME_SLOTS
 
 from services.cp_sat_scheduler import CpSatAutoScheduler
@@ -31,6 +33,7 @@ class TeacherAssignmentInfo(BaseModel):
     id: int
     initial: str
     name: str
+    email: Optional[str] = None
     contact_details: Optional[str] = None
     assigned_sections: int
     status: str
@@ -40,6 +43,51 @@ router = APIRouter(
     tags=["Admin"],
     dependencies=[Depends(get_admin_user)]
 )
+
+class UserSearchResponse(BaseModel):
+    id: int
+    name: Optional[str]
+    email: str
+    role: str
+
+@router.get("/users/search", response_model=List[UserSearchResponse])
+def search_users(
+    q: str,
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    results = []
+    search_term = f"%{q}%"
+    
+    # Search Teachers
+    teachers = db.query(Teacher).join(User).filter(
+        (Teacher.name.ilike(search_term)) | (User.email.ilike(search_term)) | (Teacher.initial.ilike(search_term))
+    ).limit(limit).all()
+    
+    for t in teachers:
+        results.append({
+            "id": t.user_id,
+            "name": t.name,
+            "email": t.user.email,
+            "role": "TEACHER"
+        })
+        
+    # Search Students
+    students = db.query(Student).join(User).filter(
+        (Student.name.ilike(search_term)) | (User.email.ilike(search_term)) | (Student.nsu_id.ilike(search_term))
+    ).limit(limit).all()
+    
+    for s in students:
+        results.append({
+            "id": s.user_id,
+            "name": s.name,
+            "email": s.user.email,
+            "role": "STUDENT"
+        })
+        
+    # Sort by name and limit total
+    results.sort(key=lambda x: (x['name'] or "").lower())
+    return results[:limit]
 
 # --- Room Management ---
 
@@ -487,13 +535,38 @@ def update_teacher(teacher_id: int, teacher_update: TeacherUpdate, background_ta
 
     # RAG Update
     db_user = db.query(User).filter(User.id == db_teacher.user_id).first()
+    
+    # Fetch Office Hours
+    office_hours_list = []
+    office_hours_text = []
+    for oh in db_teacher.office_hours:
+        oh_str = f"{oh.day} {oh.start_time} - {oh.end_time}"
+        if oh.course:
+            oh_str += f" (for {oh.course.code})"
+        office_hours_list.append({
+            "day": oh.day,
+            "start_time": oh.start_time,
+            "end_time": oh.end_time,
+            "course": oh.course.code if oh.course else "General"
+        })
+        office_hours_text.append(oh_str)
+    
+    office_hours_description = "; ".join(office_hours_text) if office_hours_text else "No office hours listed."
+
     rag_data = {
         "type": "teacher",
         "name": db_teacher.name,
         "initial": db_teacher.initial,
         "email": db_user.email if db_user else 'N/A',
         "department": db_teacher.department,
-        "description": f"Teacher {db_teacher.name} ({db_teacher.initial}). Email: {db_user.email if db_user else 'N/A'}."
+        "faculty_type": db_teacher.faculty_type,
+        "research_interests": db_teacher.research_interests,
+        "published_papers": db_teacher.published_papers,
+        "projects": db_teacher.projects,
+        "contact_details": db_teacher.contact_details,
+        "profile_picture": db_teacher.profile_picture,
+        "office_hours": office_hours_list,
+        "description": f"Teacher {db_teacher.name} ({db_teacher.initial}) is a {db_teacher.faculty_type} faculty from the {db_teacher.department} department. Email: {db_user.email if db_user else 'N/A'}. Research interests: {db_teacher.research_interests}. Contact: {db_teacher.contact_details}. Office Hours: {office_hours_description}."
     }
     trigger_rag_update(background_tasks, f"teacher_{db_teacher.id}", json.dumps(rag_data), {"type": "teacher", "initial": db_teacher.initial, "name": db_teacher.name})
 
@@ -695,7 +768,7 @@ def read_schedules(
     Returns all class schedules with pagination, search, and sorting.
     """
     skip = (page - 1) * limit
-    query = db.query(ClassSchedule).join(Section).join(Course).join(Room).join(Teacher, Section.teacher_id == Teacher.id)
+    query = db.query(ClassSchedule).join(Section).join(Course).join(Room).outerjoin(Teacher, Section.teacher_id == Teacher.id)
     
     # Search
     if search:
@@ -711,37 +784,52 @@ def read_schedules(
     total = query.count()
 
     # Sort
-    if sort_by == 'course':
-        column = Course.code
-    elif sort_by == 'section':
-        column = Section.section_number
-    elif sort_by == 'faculty':
-        column = Teacher.initial
-    elif sort_by == 'room':
-        column = Room.room_number
-    elif sort_by == 'availability':
-        column = ClassSchedule.availability
-    elif sort_by == 'day':
-        column = case(
-            (ClassSchedule.day == 'ST', 0),
-            (ClassSchedule.day == 'Sunday', 0),
-            (ClassSchedule.day == 'MW', 1),
-            (ClassSchedule.day == 'Monday', 1),
-            (ClassSchedule.day == 'Tuesday', 2),
-            (ClassSchedule.day == 'Wednesday', 3),
-            (ClassSchedule.day == 'RA', 4),
-            (ClassSchedule.day == 'Thursday', 4),
-            (ClassSchedule.day == 'Friday', 5),
-            (ClassSchedule.day == 'Saturday', 6),
-            else_=7
-        )
-    else:
-        column = ClassSchedule.id
+    sort_keys = [k.strip() for k in sort_by.split(',')]
+    sort_orders = [o.strip() for o in sort_order.split(',')]
+    
+    order_criteria = []
+    
+    for i, key in enumerate(sort_keys):
+        direction = sort_orders[i] if i < len(sort_orders) else 'asc'
+        
+        column = None
+        if key == 'course':
+            column = Course.code
+        elif key == 'section':
+            column = Section.section_number
+        elif key == 'faculty':
+            column = Teacher.initial
+        elif key == 'room':
+            column = Room.room_number
+        elif key == 'availability':
+            column = ClassSchedule.availability
+        elif key == 'day':
+            column = case(
+                (ClassSchedule.day == 'ST', 0),
+                (ClassSchedule.day == 'Sunday', 0),
+                (ClassSchedule.day == 'MW', 1),
+                (ClassSchedule.day == 'Monday', 1),
+                (ClassSchedule.day == 'Tuesday', 2),
+                (ClassSchedule.day == 'Wednesday', 3),
+                (ClassSchedule.day == 'RA', 4),
+                (ClassSchedule.day == 'Thursday', 4),
+                (ClassSchedule.day == 'Friday', 5),
+                (ClassSchedule.day == 'Saturday', 6),
+                else_=7
+            )
+        elif key == 'time':
+            column = ClassSchedule.time_slot_id
+        
+        if column is not None:
+            if direction == 'desc':
+                order_criteria.append(desc(column))
+            else:
+                order_criteria.append(asc(column))
 
-    if sort_order == 'desc':
-        query = query.order_by(desc(column), ClassSchedule.time_slot_id.asc(), ClassSchedule.id.asc())
-    else:
-        query = query.order_by(asc(column), ClassSchedule.time_slot_id.asc(), ClassSchedule.id.asc())
+    # Always add tie-breakers
+    order_criteria.extend([ClassSchedule.time_slot_id.asc(), ClassSchedule.id.asc()])
+    
+    query = query.order_by(*order_criteria)
 
     schedules = query.offset(skip).limit(limit).all()
     return {"items": schedules, "total": total, "page": page, "size": limit}
@@ -762,56 +850,134 @@ def create_schedule(schedule: ClassScheduleCreate, background_tasks: BackgroundT
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
 
-    # Check for conflicts (Room occupied at that time)
-    conflict = db.query(ClassSchedule).filter(
-        ClassSchedule.room_id == schedule.room_id,
-        ClassSchedule.day == schedule.day,
-        ClassSchedule.time_slot_id == schedule.time_slot_id
-    ).first()
-    
-    if conflict:
-        raise HTTPException(status_code=400, detail="Room is already booked for this time slot")
+    # Validate Room Type
+    if section.course.type != room.type:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot schedule {section.course.type.value} course in {room.type.value} room"
+        )
 
-    new_schedule = ClassSchedule(**schedule.model_dump())
-    db.add(new_schedule)
-    db.commit()
-    db.refresh(new_schedule)
-    
-    # RAG Update
-    time_str = TIME_SLOTS.get(new_schedule.time_slot_id, "Unknown Time")
-    rag_data = {
-        "type": "schedule",
-        "course_code": new_schedule.section.course.code,
-        "course_title": new_schedule.section.course.title,
-        "section_number": new_schedule.section.section_number,
-        "teacher_initial": new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA',
-        "room_number": new_schedule.room.room_number,
-        "day": new_schedule.day,
-        "time": time_str,
-        "description": f"Class: {new_schedule.section.course.code} - {new_schedule.section.course.title} (Section {new_schedule.section.section_number}). Teacher: {new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA'}. Room: {new_schedule.room.room_number}. Time: {new_schedule.day} {time_str}."
-    }
-    
-    trigger_rag_update(
-        background_tasks, 
-        f"schedule_{new_schedule.id}", 
-        json.dumps(rag_data), 
-        {
-            "type": "schedule", 
-            "course_code": new_schedule.section.course.code,
-            "teacher_initial": new_schedule.section.teacher.initial if new_schedule.section.teacher else 'TBA',
-            "room_number": new_schedule.room.room_number,
-            "day": new_schedule.day
+    # Validate Lab Time Slots
+    if section.course.duration_mode == DurationMode.EXTENDED:
+        if schedule.time_slot_id not in [1, 3, 5]:
+             raise HTTPException(status_code=400, detail="Lab classes must start at slot 1, 3, or 5")
+
+    # Validate Day based on Course Type
+    if section.course.type == ClassType.THEORY:
+        if schedule.day not in ['ST', 'MW', 'RA']:
+             raise HTTPException(status_code=400, detail="Theory courses must be scheduled on ST, MW, or RA days")
+    elif section.course.type == ClassType.LAB:
+        if schedule.day in ['ST', 'MW', 'RA']:
+             raise HTTPException(status_code=400, detail="Lab courses must be scheduled on specific days (Sunday-Saturday)")
+
+    # Update teacher if provided
+    current_teacher_id = section.teacher_id
+    if schedule.teacher_id is not None:
+        # Verify teacher exists
+        teacher = db.query(Teacher).filter(Teacher.id == schedule.teacher_id).first()
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+        current_teacher_id = schedule.teacher_id
+
+    # Determine required slots
+    required_slots = [schedule.time_slot_id]
+    if section.course.duration_mode == DurationMode.EXTENDED:
+        if schedule.time_slot_id >= 7: # Assuming 7 is the last slot
+             raise HTTPException(status_code=400, detail="Cannot schedule extended class in the last time slot")
+        required_slots.append(schedule.time_slot_id + 1)
+
+    created_schedules = []
+
+    for slot_id in required_slots:
+        # 1. Room Conflict
+        room_conflict = db.query(ClassSchedule).filter(
+            ClassSchedule.room_id == schedule.room_id,
+            ClassSchedule.day == schedule.day,
+            ClassSchedule.time_slot_id == slot_id
+        ).first()
+        if room_conflict:
+             raise HTTPException(status_code=400, detail=f"Room is already booked for time slot {slot_id}")
+
+        # 2. Section Conflict (Same section cannot be in two places)
+        section_conflict = db.query(ClassSchedule).filter(
+            ClassSchedule.section_id == schedule.section_id,
+            ClassSchedule.day == schedule.day,
+            ClassSchedule.time_slot_id == slot_id
+        ).first()
+        if section_conflict:
+             raise HTTPException(status_code=400, detail=f"Section is already scheduled for time slot {slot_id}")
+
+        # 3. Teacher Conflict
+        if current_teacher_id:
+            # Find all sections taught by this teacher
+            teacher_section_ids = db.query(Section.id).filter(Section.teacher_id == current_teacher_id).all()
+            teacher_section_ids = [s[0] for s in teacher_section_ids]
+            
+            if teacher_section_ids:
+                teacher_conflict = db.query(ClassSchedule).filter(
+                    ClassSchedule.section_id.in_(teacher_section_ids),
+                    ClassSchedule.day == schedule.day,
+                    ClassSchedule.time_slot_id == slot_id
+                ).first()
+                if teacher_conflict:
+                    raise HTTPException(status_code=400, detail=f"Teacher is already teaching another class at time slot {slot_id}")
+
+    # If all checks pass, update section teacher if needed
+    if schedule.teacher_id is not None and section.teacher_id != schedule.teacher_id:
+        section.teacher_id = schedule.teacher_id
+        db.add(section)
+        db.commit()
+        db.refresh(section)
+
+    # If all checks pass, create schedules
+    for slot_id in required_slots:
+        new_schedule = ClassSchedule(
+            section_id=schedule.section_id,
+            room_id=schedule.room_id,
+            day=schedule.day,
+            time_slot_id=slot_id,
+            is_friday_booking=schedule.is_friday_booking
+        )
+        db.add(new_schedule)
+        db.commit()
+        db.refresh(new_schedule)
+        created_schedules.append(new_schedule)
+        
+        # RAG Update
+        time_str = TIME_SLOTS.get(slot_id, "Unknown Time")
+        rag_data = {
+            "type": "schedule",
+            "course_code": section.course.code,
+            "course_title": section.course.title,
+            "section_number": section.section_number,
+            "teacher_initial": section.teacher.initial if section.teacher else 'TBA',
+            "room_number": room.room_number,
+            "day": schedule.day,
+            "time": time_str,
+            "description": f"Class: {section.course.code} - {section.course.title} (Section {section.section_number}). Teacher: {section.teacher.initial if section.teacher else 'TBA'}. Room: {room.room_number}. Time: {schedule.day} {time_str}."
         }
-    )
+        
+        trigger_rag_update(
+            background_tasks, 
+            f"schedule_{new_schedule.id}", 
+            json.dumps(rag_data), 
+            {
+                "type": "schedule", 
+                "course_code": section.course.code,
+                "teacher_initial": section.teacher.initial if section.teacher else 'TBA',
+                "room_number": room.room_number,
+                "day": schedule.day
+            }
+        )
 
-    return new_schedule
+    return created_schedules[0]
 
 @router.get("/teacher-assignments", response_model=List[TeacherAssignmentInfo])
 def get_teacher_assignments(db: Session = Depends(get_db)):
     """
     Get assignment status for all teachers.
     """
-    teachers = db.query(Teacher).all()
+    teachers = db.query(Teacher).filter(Teacher.initial != 'TBA').all()
     result = []
     for teacher in teachers:
         assigned_count = db.query(Section).filter(Section.teacher_id == teacher.id).count()
@@ -821,6 +987,7 @@ def get_teacher_assignments(db: Session = Depends(get_db)):
             "id": teacher.id,
             "initial": teacher.initial,
             "name": teacher.name,
+            "email": teacher.email,
             "contact_details": teacher.contact_details,
             "assigned_sections": assigned_count,
             "status": status
@@ -860,16 +1027,157 @@ def delete_teachers_bulk(request: BulkDeleteRequest, background_tasks: Backgroun
 
 @router.post("/schedules/bulk-delete")
 def delete_schedules_bulk(request: BulkDeleteRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # Get section IDs associated with these schedules to reset teacher assignment
+    schedules = db.query(ClassSchedule).filter(ClassSchedule.id.in_(request.ids)).all()
+    section_ids = [s.section_id for s in schedules]
+    
+    if section_ids:
+        db.query(Section).filter(Section.id.in_(section_ids)).update({Section.teacher_id: None}, synchronize_session=False)
+
     db.query(ClassSchedule).filter(ClassSchedule.id.in_(request.ids)).delete(synchronize_session=False)
     db.commit()
     trigger_rag_bulk_delete(background_tasks, [f"schedule_{id}" for id in request.ids])
     return {"message": "Schedules deleted successfully"}
+
+@router.put("/schedules/{schedule_id}", response_model=ClassScheduleSchema)
+def update_schedule(
+    schedule_id: int, 
+    schedule_update: ClassScheduleCreate, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
+    # Fetch existing schedule to get the section
+    db_schedule = db.query(ClassSchedule).filter(ClassSchedule.id == schedule_id).first()
+    if not db_schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    section_id = db_schedule.section_id
+    section = db.query(Section).filter(Section.id == section_id).first()
+    
+    # Validate New Room
+    room = db.query(Room).filter(Room.id == schedule_update.room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    if section.course.type != room.type:
+        raise HTTPException(status_code=400, detail=f"Room type mismatch. Course is {section.course.type.value}, Room is {room.type.value}")
+
+    # Determine slots to book
+    slots_to_book = [schedule_update.time_slot_id]
+    if section.course.duration_mode == DurationMode.EXTENDED:
+        if schedule_update.time_slot_id not in [1, 3, 5]:
+             raise HTTPException(status_code=400, detail="Lab classes must start at slot 1, 3, or 5")
+        slots_to_book.append(schedule_update.time_slot_id + 1)
+
+    # Validate Day based on Course Type
+    if section.course.type == ClassType.THEORY:
+        if schedule_update.day not in ['ST', 'MW', 'RA']:
+             raise HTTPException(status_code=400, detail="Theory courses must be scheduled on ST, MW, or RA days")
+    elif section.course.type == ClassType.LAB:
+        if schedule_update.day in ['ST', 'MW', 'RA']:
+             raise HTTPException(status_code=400, detail="Lab courses must be scheduled on specific days (Sunday-Saturday)")
+
+    # Determine effective teacher ID
+    current_teacher_id = section.teacher_id
+    if schedule_update.teacher_id is not None:
+        # Verify teacher exists
+        teacher = db.query(Teacher).filter(Teacher.id == schedule_update.teacher_id).first()
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+        current_teacher_id = schedule_update.teacher_id
+
+    # Check Conflicts (excluding this section's current schedules)
+    for slot_id in slots_to_book:
+        # Room Conflict
+        room_conflict = db.query(ClassSchedule).filter(
+            ClassSchedule.room_id == schedule_update.room_id,
+            ClassSchedule.day == schedule_update.day,
+            ClassSchedule.time_slot_id == slot_id,
+            ClassSchedule.section_id != section_id # Exclude self
+        ).first()
+        if room_conflict:
+             raise HTTPException(status_code=400, detail=f"Room is already booked for time slot {slot_id}")
+
+        # Teacher Conflict
+        if current_teacher_id:
+            teacher_section_ids = db.query(Section.id).filter(Section.teacher_id == current_teacher_id).all()
+            teacher_section_ids = [s[0] for s in teacher_section_ids]
+            
+            if teacher_section_ids:
+                teacher_conflict = db.query(ClassSchedule).filter(
+                    ClassSchedule.section_id.in_(teacher_section_ids),
+                    ClassSchedule.day == schedule_update.day,
+                    ClassSchedule.time_slot_id == slot_id,
+                    ClassSchedule.section_id != section_id # Exclude self
+                ).first()
+                if teacher_conflict:
+                    raise HTTPException(status_code=400, detail=f"Teacher is already teaching another class at time slot {slot_id}")
+
+    # Update teacher if changed
+    if schedule_update.teacher_id is not None and section.teacher_id != schedule_update.teacher_id:
+        section.teacher_id = schedule_update.teacher_id
+        db.add(section)
+        db.commit()
+        db.refresh(section)
+
+    # Delete OLD schedules for this section
+    db.query(ClassSchedule).filter(ClassSchedule.section_id == section_id).delete()
+    
+    # Create NEW schedules
+    new_schedules = []
+    for slot_id in slots_to_book:
+        new_sched = ClassSchedule(
+            section_id=section_id,
+            room_id=schedule_update.room_id,
+            day=schedule_update.day,
+            time_slot_id=slot_id,
+            availability=room.capacity
+        )
+        db.add(new_sched)
+        new_schedules.append(new_sched)
+        
+    db.commit()
+    
+    # RAG Update
+    time_str = TIME_SLOTS.get(new_schedules[0].time_slot_id, "Unknown Time")
+    teacher_initial = section.teacher.initial if section.teacher else "TBA"
+    rag_data = {
+        "type": "schedule",
+        "course_code": section.course.code,
+        "course_title": section.course.title,
+        "section_number": section.section_number,
+        "teacher_initial": teacher_initial,
+        "room_number": room.room_number,
+        "day": schedule_update.day,
+        "time": time_str,
+        "description": f"Class: {section.course.code} - {section.course.title} (Section {section.section_number}). Teacher: {teacher_initial}. Room: {room.room_number}. Time: {schedule_update.day} {time_str}."
+    }
+    
+    # We use the ID of the first schedule created as the vector ID
+    trigger_rag_update(
+        background_tasks, 
+        f"schedule_{new_schedules[0].id}", 
+        json.dumps(rag_data), 
+        {
+            "type": "schedule", 
+            "course_code": section.course.code,
+            "teacher_initial": teacher_initial,
+            "room_number": room.room_number,
+            "day": schedule_update.day
+        }
+    )
+    
+    return new_schedules[0]
 
 @router.delete("/schedules/{schedule_id}")
 def delete_schedule(schedule_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     db_schedule = db.query(ClassSchedule).filter(ClassSchedule.id == schedule_id).first()
     if not db_schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    # Reset teacher_id for the section
+    db.query(Section).filter(Section.id == db_schedule.section_id).update({Section.teacher_id: None}, synchronize_session=False)
+    
     db.delete(db_schedule)
     db.commit()
     trigger_rag_delete(background_tasks, f"schedule_{schedule_id}")
@@ -884,6 +1192,10 @@ def delete_all_schedules(background_tasks: BackgroundTasks, db: Session = Depend
     all_ids = [s.id for s in db.query(ClassSchedule.id).all()]
     
     try:
+        # Reset teacher assignments in Sections
+        db.query(Section).update({Section.teacher_id: None}, synchronize_session=False)
+        
+        # Delete all schedules
         db.query(ClassSchedule).delete(synchronize_session=False)
         db.commit()
     except Exception as e:
@@ -905,7 +1217,32 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     
     # Distribution of classes per day
     classes_per_day = db.query(ClassSchedule.day, func.count(ClassSchedule.id)).group_by(ClassSchedule.day).all()
-    classes_per_day_dict = {day: count for day, count in classes_per_day}
+    raw_counts = {day: count for day, count in classes_per_day}
+    
+    # Distribute combined patterns (ST, MW, RA) into single days
+    final_counts = {
+        'Sunday': 0, 'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 
+        'Thursday': 0, 'Friday': 0, 'Saturday': 0
+    }
+    
+    for day, count in raw_counts.items():
+        if day == 'ST':
+            final_counts['Sunday'] += count
+            final_counts['Tuesday'] += count
+        elif day == 'MW':
+            final_counts['Monday'] += count
+            final_counts['Wednesday'] += count
+        elif day == 'RA':
+            final_counts['Thursday'] += count
+            final_counts['Saturday'] += count
+        elif day in final_counts:
+            final_counts[day] += count
+            
+    classes_per_day_dict = final_counts
+    
+    # Calculate total class sessions (sum of all daily counts)
+    # This ensures the "Scheduled Classes" card matches the sum of the "Weekly Class Distribution" chart
+    total_class_sessions = sum(final_counts.values())
     
     # Room usage (top 5 busiest rooms)
     room_usage = db.query(Room.room_number, func.count(ClassSchedule.id).label('count'))\
@@ -922,7 +1259,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "total_students": total_students,
         "total_courses": total_courses,
         "total_rooms": total_rooms,
-        "total_schedules": total_schedules,
+        "total_schedules": total_class_sessions,
         "classes_per_day": classes_per_day_dict,
         "room_usage": room_usage_list
     }

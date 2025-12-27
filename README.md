@@ -7,41 +7,57 @@ This project is a Class Schedule Management System designed to help manage and o
 
 ### 1. Intelligent Auto-Scheduling
 The core of the system is a sophisticated auto-scheduling algorithm that optimizes resource allocation:
-- **Floor-Level Prioritization:** Automatically fills lower-floor rooms (e.g., 200-level) before moving to higher floors to ensure efficient building utilization.
-- **Department-Specific Allocation:** Intelligently assigns ECE courses to SAC rooms and other departments to NAC rooms.
+- **Round-Robin Allocation:** Distributes courses fairly among teachers based on their preferences, preventing one teacher from getting all prime slots.
+- **Sibling Section Linking:** Automatically attempts to schedule the Lab section immediately after the Theory section for the same teacher, ensuring continuity.
 - **Teacher Preference Integration:** Prioritizes teacher's preferred time slots and ensures they are assigned to the courses they requested.
-- **Lab/Theory Consistency:** Guarantees that if a teacher is assigned a Theory section, they are also linked to the corresponding Lab section.
+- **Strict Constraint Enforcement:** Adheres to strict academic rules (Theory on ST/MW/RA, Labs on single days, specific Lab time slots).
 - **Conflict Resolution:** Automatically handles "TBA" assignments for unassigned sections and falls back to random valid slots if preferences cannot be met.
 
 ### 2. Comprehensive Admin Management
 - **Unified Scheduling Interface:** A consolidated "Manage Schedules" page that offers:
+    - **Smart Form Logic:** New "Add/Edit Schedule" forms with cascading dropdowns (Course -> Section -> Faculty) to prevent errors.
+    - **Dynamic Filtering:** Automatically filters "Day" and "Time Slot" options based on the course type (e.g., only showing Lab slots for Lab courses).
+    - **Constraint Enforcement:** Strict validation ensures Theory courses are on ST/MW/RA days and Labs are on single days with valid extended time slots (1, 3, 5).
+    - **Teacher Reassignment:** Allows admins to reassign teachers directly while editing a schedule, with real-time conflict detection.
     - **Auto-Schedule Trigger:** Run the complex scheduling algorithm with one click.
-    - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules, supporting complex day patterns (ST, MW, RA).
-    - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules (downloads complete datasets).
+    - **Table View:** A detailed grid view (Time Slots x Days) for managing schedules.
+    - **Data Export:** One-click PDF and CSV export for Teachers, Courses, Rooms, and Schedules.
 - **Preference Management:**
     - **Approval Workflow:** Teachers submit preferences which enter a "Pending" state. Admins can review, accept, or reject them individually or in bulk. Only accepted preferences are fed into the auto-scheduler.
 - **Resource Management:** Full CRUD capabilities for Rooms, Courses, and Teachers with bulk upload (CSV) and bulk delete options.
 - **Teacher Assignment Overview:** Real-time tracking of faculty assignments and workload.
+- **Notification System:**
+    - **Broadcast & Targeted Messaging:** Admins can send announcements to "All Users", "All Teachers", "All Students", or specific individuals.
+    - **User Search:** When targeting specific users, admins can search across both Student and Teacher databases by name, email, or ID.
+    - **History Log:** A complete history of sent notifications is maintained for administrative review.
+    - **Auto-Notifications:** The system automatically notifies teachers when the auto-scheduler assigns them new courses, providing a detailed list of their classes, rooms, and times.
 
 ### 3. AI-Powered Assistant (RAG)
 - **Context-Aware Chatbot:** A floating AI assistant available throughout the portal that answers queries about schedules, rules, and user data.
+- **Persistent Chat History:** Chat sessions are now saved to the database, allowing users to view their previous conversations with the AI assistant.
 - **Real-Time Synchronization:** Any change in the database (Create/Update/Delete) is instantly reflected in the Pinecone vector database.
 - **Optimized Data Structure:** All data is stored as structured JSON objects in the vector database, enabling the AI to parse and understand complex relationships (e.g., Teacher-Course-Room mappings) more effectively.
-- **Enhanced Teacher Profiles:** The vector database now indexes comprehensive teacher profiles, including email, faculty type, research interests, and published papers, allowing for rich queries like "Who specializes in AI?".
-- **Office Hours & Bookings:** The AI now has access to teacher office hours and room booking requests, enabling it to answer questions like "When is Professor X available?" or "What is the status of my room booking?".
-- **Performance Optimization:** Implemented bulk indexing strategies to handle large datasets efficiently, ensuring rapid system resets and updates.
-- **Asynchronous Processing:** Vectorization and database upserts are handled in background tasks, ensuring that the user interface remains responsive during heavy data operations.
+- **Rich Context Descriptions:** Every vector embedding (Rooms, Teachers, Courses, Schedules, Bookings) now includes a natural language `description` field. This ensures the AI understands the full context (e.g., "Office hours for Teacher X are on Monday...") and reduces "I don't know" responses.
+- **Enhanced Teacher Profiles:** The vector database indexes comprehensive teacher profiles, including email, faculty type, research interests, published papers, and office hours.
+- **Office Hours & Bookings:** The AI has access to teacher office hours and room booking requests, enabling it to answer questions like "When is Professor X available?" or "What is the status of my room booking?".
+- **Performance Optimization:** Implemented bulk indexing strategies to handle large datasets efficiently.
+- **Asynchronous Processing:** Vectorization and database upserts are handled in background tasks.
 - **Privacy Filters:** Automatically redacts sensitive information (like CGPA) based on the user's role.
 
 ### 4. Student & Teacher Portals
+- **Shared Features:**
+    - **Notification Center:** A dedicated page for viewing announcements.
+    - **Real-Time Alerts:** A blinking red badge on the sidebar indicates unseen notifications.
+    - **Read Status:** Users can mark notifications as read, updating the badge count instantly.
 - **Student Features:**
     - **Course Planner:** Interactive tool to plan semesters, check for conflicts, and manage course loads.
-    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing enrolled courses with time slots, room numbers, and day patterns.
+    - **My Schedule:** Personalized schedule view showing enrolled courses.
 - **Teacher Features:**
-    - **Dashboard:** Overview of assigned courses, total credits (calculated across all assigned sections), and office hours.
-    - **My Schedule:** Personalized schedule view (now available as a detailed Table View) showing assigned classes.
+    - **Dashboard:** Overview of assigned courses, total credits, and office hours.
+    - **My Schedule:** Personalized schedule view showing assigned classes.
     - **Profile Management:** Manage research interests, office hours, and public profile details.
-    - **Faculty Types:** Support for Permanent (12 credits min) and Adjunct (3 credits min) faculty roles.
+    - **Contact Info:** "Mail" icons in schedule views allow quick email communication with students or admins.
+    - **Faculty Types:** Support for Permanent and Adjunct faculty roles.
 
 ### 5. Google Calendar Integration
 - **Seamless Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
@@ -62,30 +78,32 @@ The core of the system is a sophisticated auto-scheduling algorithm that optimiz
 The system features an intelligent Auto Scheduler (`backend/services/scheduler.py`) that automates the complex task of assigning teachers to sections and scheduling classes into rooms and time slots.
 
 ### Algorithm Overview
-1.  **Teacher Assignment Phase:**
-    *   **Input:** `TeacherPreference` records (Course, Number of Sections).
-    *   **Process:** The system iterates through accepted teacher preferences and assigns teachers to unassigned sections of the requested courses.
-    *   **Goal:** Ensure faculty members are assigned to the courses they requested, respecting their section limits.
-    *   **TBA Handling:** Any sections remaining unassigned after this phase are linked to a placeholder "TBA" teacher to ensure they are still scheduled.
+1.  **Initialization Phase:**
+    *   **Data Loading:** Fetches all Rooms, Teachers, and Sections. Clears existing schedules to start fresh.
+    *   **Matrix Setup:** Initializes 3D matrices (Entity x Day x Slot) for both Rooms and Instructors to track availability in real-time.
 
-2.  **Initialization Phase:**
-    *   **Schedule Matrix:** A 3D matrix (Room x Day x TimeSlot) is initialized to track room availability.
-    *   **Teacher Matrix:** A similar structure tracks teacher availability to prevent double-booking.
-    *   **Existing Schedules:** Any pre-existing schedules are loaded into the matrices to ensure new schedules don't conflict.
+2.  **Round-Robin Teacher Assignment:**
+    *   **Queue Building:** Creates a priority queue for each teacher based on their *accepted* `TeacherPreference`s.
+    *   **Fair Distribution:** Iterates through teachers in a round-robin fashion (Round 1: 1st preference, Round 2: 2nd preference, etc.) to ensure fair allocation of desired courses.
+    *   **Section Matching:** For each preferred course, finds the first unassigned section and attempts to schedule it.
 
-3.  **Lab Scheduling Phase (Priority):**
-    *   **Why First?** Labs require specific room types (`LAB`) and longer durations (`EXTENDED` mode, typically 2 consecutive slots), making them harder to fit.
-    *   **Process:**
-        *   Iterate through all sections with `EXTENDED` duration mode.
-        *   Filter for rooms of type `LAB`.
-        *   **Department Logic:** ECE labs are prioritized for SAC building rooms.
-        *   **Optimization:** Sort rooms by floor level (ascending) to fill lower floors (e.g., 200-level) first.
-        *   **Teacher Preferences:** Check if the assigned teacher has a specific timing preference (`TeacherTimingPreference`). Try to schedule in that slot first.
-        *   **Conflict Check:** Ensure the room is free, the teacher is free, and the slot is valid for extended duration.
-        *   **Fallback:** If preferred slots are full, try other available slots.
+3.  **Smart Slot Selection:**
+    *   **Pattern Generation:** Generates valid time/day options based on course type:
+        *   **Theory:** Combined patterns (ST, MW, RA) across 7 time slots.
+        *   **Lab:** Single days (Sun-Sat) restricted to extended slots (1, 3, 5).
+    *   **Load Balancing:** Dynamically tracks the usage of Theory patterns (ST, MW, RA) and prioritizes the least used pattern for the next assignment. This ensures an even distribution of classes across the week, preventing overcrowding on specific days.
+    *   **Preference Prioritization:** Sorts all possible options to prioritize the teacher's specific `TeacherTimingPreference` (e.g., "Sunday Morning").
+    *   **Validation:** Checks `is_slot_valid` for:
+        *   Room availability.
+        *   Teacher availability.
+        *   **Sibling Conflict:** Ensures a Theory section doesn't overlap with its corresponding Lab section (and vice versa).
 
-4.  **Theory Scheduling Phase:**
-    *   **Process:**
+4.  **Sibling Consistency:**
+    *   **Linked Scheduling:** Immediately after scheduling a section (e.g., Theory), the algorithm attempts to schedule its "sibling" section (e.g., Lab) with the *same teacher*. This guarantees that faculty members keep their Theory and Lab sections together.
+
+5.  **TBA Fallback:**
+    *   **Cleanup:** Any sections that couldn't be assigned to a specific teacher (due to conflicts or lack of preferences) are processed in a final pass.
+    *   **Assignment:** These are scheduled into any remaining valid slots with `Teacher: TBA` to ensure the class is offered even without an assigned instructor.
         *   Iterate through all sections with `STANDARD` duration mode.
         *   Filter for rooms of type `THEORY`.
         *   **Department Logic:** ECE courses are prioritized for SAC rooms; others for NAC.
@@ -122,13 +140,19 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - `role`: The user role ('admin', 'teacher', 'student') to determine the navigation links.
     - **Features:**
         - **Dynamic Navigation:** Renders different sidebar links based on the user's role.
+        - **Notification Badge:** A real-time blinking red badge on the "Notifications" link indicating unread messages.
         - **User Identity:** Displays the logged-in user's full name and role in the sidebar footer.
         - **Responsive Design:** Collapsible sidebar for mobile devices with a hamburger menu.
         - **Role-Based Links:**
             - **Admin:** Dashboard, Manage Teachers, Manage Courses, Scheduler, Manage Schedules, Manage Bookings, Settings.
-            - **Teacher:** Dashboard, My Schedule, Book Room, Preferences, Settings.
-            - **Student:** Dashboard, My Schedule, Course Planner, Book Room.
+            - **Teacher:** Dashboard, Notifications, My Schedule, Book Room, Preferences, Settings.
+            - **Student:** Dashboard, Notifications, My Schedule, Course Planner, Book Room.
 - **Shared Pages:**
+    - **Notifications (`src/pages/shared/Notifications.jsx`):**
+        - **Central Hub:** Displays a list of all notifications for the user.
+        - **Read Status:** Visual distinction between read (gray) and unread (white) notifications.
+        - **Actions:** Users can mark individual notifications as read or "Mark All as Read".
+        - **Empty State:** Friendly UI when there are no notifications.
     - **Book Room (`src/pages/shared/BookRoom.jsx`):**
         - **Availability Check:** Users can search for available rooms by date, time slot, and room type.
         - **Visual Status:** Rooms are color-coded (Green: Available, Yellow: Pending, Red: Occupied).
@@ -227,6 +251,14 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Availability:** Shows room capacity (e.g., "35 Seats").
         - **Sorting:** Global server-side sorting for all columns including Availability.
         - **Bulk Actions:** Delete multiple schedule entries at once.
+        - **Smart Display:** Automatically merges consecutive time slots for Extended Labs into a single row (e.g., "08:00 AM - 11:10 AM") for cleaner visualization.
+        - **Manual Scheduling:**
+            - **Conflict Detection:** Prevents double-booking of Rooms, Sections, and Teachers.
+            - **Extended Labs:** Automatically books two consecutive slots when scheduling an Extended Lab.
+        - **PDF Export:**
+            - **Custom Header:** Includes the current semester name (e.g., "Class Schedules - Fall 2025") fetched from system settings.
+            - **Optimized Sorting:** Schedules are automatically sorted by Course Code (ASC) and then Section Number (ASC) for better readability.
+            - **Clean Layout:** Excludes internal IDs and focuses on relevant details (Course, Section, Teacher, Room, Day, Time).
     - **Admin Management:**
         - **Create Admin:** Existing admins can create new admin accounts.
         - **Security:** Randomly generates secure passwords for new admins.
@@ -241,7 +273,10 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Schedule Preview:** List of today's classes with time, room, and type details.
     - **My Schedule (`src/pages/student/MySchedule.jsx`):**
         - **Calendar View:** Interactive weekly calendar displaying enrolled classes and approved bookings.
-        - **Integration:** Syncs with Google Calendar.
+        - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
+            - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration.
+            - **Pattern Support:** Correctly handles multi-day patterns (e.g., ST = Sunday & Tuesday) by creating recurring events on both days.
+            - **Room Bookings:** Approved one-time room bookings are also synced.
     - **Settings (`src/pages/student/Settings.jsx`):**
         - **Profile Management:** Update full name, NSU ID, CGPA, and Course History.
         - **Profile Picture:** Upload and update profile picture.
@@ -258,6 +293,7 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - **Event Details:** Shows course code, title, room, and section.
             - **Google Calendar Sync:** One-click synchronization of the entire semester's schedule to the user's primary Google Calendar.
                 - **Recurring Events:** Classes are synced as weekly recurring events for the semester duration (14 weeks).
+                - **Pattern Support:** Correctly handles multi-day patterns (e.g., ST = Sunday & Tuesday) by creating recurring events on both days.
                 - **Room Bookings:** Approved one-time room bookings are also synced to the calendar.
                 - **Smart Mapping:** Automatically calculates the next occurrence of class days.
                 - **OAuth Integration:** Securely connects to Google via OAuth 2.0.
@@ -321,6 +357,10 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - Slot 5: 02:40 PM - 04:10 PM
             - Slot 6: 04:20 PM - 05:50 PM
             - Slot 7: 06:00 PM - 07:30 PM
+        - **Lab Time Slots (Merged):**
+            - Slot L1 (1+2): 08:00 AM - 11:10 AM
+            - Slot L2 (3+4): 11:20 AM - 02:30 PM
+            - Slot L3 (5+6): 02:40 PM - 05:50 PM
         - **Special Labs:** `CSE115L`, `CSE215L`, `CSE225L` follow theory time slot system timings.
     - **CSV Import Logic:**
         - **Auto-Detection:**
@@ -334,22 +374,24 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
         - **Scheduling Strategy:**
             - **Pass 1 (Extended Labs):**
                 - Targets `LAB` courses with `EXTENDED` duration.
-                - Finds 2 consecutive empty slots in `LAB` rooms.
+                - **Slot Logic:** Uses predefined merged slots (1+2, 3+4, 5+6) to ensure labs fit into 3h 10m blocks.
+                - **Conflict Check:** Ensures no overlap with existing schedules and respects teacher availability.
                 - Assigns once per week.
             - **Pass 2 (Standard Courses):**
                 - Targets `THEORY` courses and `SPECIAL LABS` (`STANDARD` duration).
                 - **Theory:** Fits into `THEORY` rooms.
                 - **Special Labs:** Fits into `LAB` rooms.
                 - **Pattern Matching:** Assigns to `ST` (Sun+Tue), `MW` (Mon+Wed), or `RA` (Thu+Sat) at the same time slot.
+                - **Sibling Conflict Check:** Prevents scheduling a Theory course (e.g., CSE115) at the same time as its corresponding Lab (e.g., CSE115L) to avoid student conflicts.
 - **AI Chatbot (RAG):**
     - **Integration:** Uses Pinecone for vector storage and Mistral AI for embeddings and chat completion.
     - **Real-time Synchronization:**
         - **Automatic Updates:** Any creation, update, or deletion of Rooms, Courses, Teachers, or Schedules in the database triggers an immediate background update to the Vector Database.
         - **Auto-Scheduler Integration:** Running the auto-scheduler automatically indexes hundreds of new class schedules with detailed time and location info.
         - **Data Coverage:**
-            - **Rooms:** Capacity, Type (Lab/Theory).
-            - **Courses:** Code, Title, Credits, Type.
-            - **Teachers:** Name, Initial, Email.
+            - **Rooms:** Capacity, Type (Lab/Theory), Description.
+            - **Courses:** Code, Title, Credits, Type, Description.
+            - **Teachers:** Name, Initial, Email, Office Hours, Research Interests, Description.
             - **Schedules:** Exact time, day, room, and teacher for every section.
     - **Functionality:**
         - Answers queries about university rules, schedules, and user profiles.
@@ -365,7 +407,15 @@ The system features an intelligent Auto Scheduler (`backend/services/scheduler.p
             - Fetches all available sections from the database.
             - Feeds the user's constraints (e.g., "I want ST classes") and the section list to Mistral.
             - Mistral generates a conflict-free schedule suggestion.
-- *Pending implementation*
+- **Notification System:**
+    - **Architecture:** Polling-based architecture (30s interval) to ensure real-time delivery without WebSocket complexity.
+    - **Targeting:** Supports broadcasting to all users, specific roles (Teachers/Students), or individual users.
+    - **Triggers:**
+        - **Manual:** Admins can send custom announcements.
+        - **Automated:** The Auto-Scheduler triggers notifications to teachers upon schedule generation.
+    - **User Experience:**
+        - **Visual Cues:** Blinking red badge on the sidebar.
+        - **Management:** Dedicated page to view and mark notifications as read.
 
 ## Project Structure
 ```
@@ -502,6 +552,14 @@ MISTRAL_API_KEY=your_mistral_api_key
         - `GET /bookings/my-requests`: View own booking requests.
         - `GET /bookings/admin/requests`: Admin view of all requests.
         - `PUT /bookings/admin/requests/{id}`: Admin Approve/Reject requests.
+    - **Notifications:**
+        - `GET /notifications`: Get all notifications for the current user.
+        - `GET /notifications/unread-count`: Get the count of unread notifications.
+        - `PUT /notifications/{id}/read`: Mark a specific notification as read.
+        - `PUT /notifications/read-all`: Mark all notifications as read.
+        - `POST /admin/notifications/broadcast`: Send a notification to all users or specific roles.
+        - `POST /admin/notifications/send`: Send a notification to specific users.
+        - `GET /admin/users/search`: Search for users (Teachers/Students) to target notifications.
     - **Google Calendar Integration:**
         - `GET /google/login`: Redirects to Google OAuth2 login.
         - `POST /google/connect`: Connects account using the auth code.
@@ -518,7 +576,7 @@ MISTRAL_API_KEY=your_mistral_api_key
         - **RAG Pipeline:**
             - **Trigger:** Updates are triggered automatically on CRUD operations.
             - **Execution:** Runs asynchronously as a FastAPI Background Task to prevent blocking.
-            - **Data Format:** Converts entity objects (Rooms, Teachers, etc.) into structured JSON strings before embedding.
+            - **Data Format:** Converts entity objects (Rooms, Teachers, etc.) into structured JSON strings with rich natural language descriptions before embedding.
             - **Process:** Generates embeddings using Mistral and upserts to Pinecone with rich metadata.
     - **AI Chat:**
         - `POST /chat/message`: Send a message to the AI Assistant.
