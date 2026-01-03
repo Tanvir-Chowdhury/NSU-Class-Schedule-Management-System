@@ -1,5 +1,60 @@
 # Class Schedule Management System
 
+## Project Screenshots
+
+### General
+| Home Page | Login Page |
+|:---:|:---:|
+| ![Home Page](screenshots/home_page.png) | ![Login Page](screenshots/login_page.png) |
+
+| Register Page |
+|:---:|
+| ![Register Page](screenshots/register_page.png) |
+
+### Admin Portal
+| Dashboard & Auto Schedule | Manage Teachers |
+|:---:|:---:|
+| ![Admin Dashboard](screenshots/admin_portal/admin_auto_schedule.png) | ![Manage Teachers](screenshots/admin_portal/admin_manage_teacher.png) |
+
+| Manage Courses | Manage Rooms |
+|:---:|:---:|
+| ![Manage Courses](screenshots/admin_portal/admin_manage_courses.png) | ![Manage Rooms](screenshots/admin_portal/admin_manage_rooms.png) |
+
+| Manage Preferences | Manage Bookings |
+|:---:|:---:|
+| ![Manage Preferences](screenshots/admin_portal/admin_manage_preferences.png) | ![Manage Bookings](screenshots/admin_portal/admin_manage_bookings.png) |
+
+| Manage Notifications |
+|:---:|
+| ![Manage Notifications](screenshots/admin_portal/admin_manage_notifications.png) |
+
+### Teacher Portal
+| Dashboard | My Schedule |
+|:---:|:---:|
+| ![Teacher Dashboard](screenshots/teacher_portal/teacher_dashboard.png) | ![Teacher Schedule](screenshots/teacher_portal/teacher_my_schedule.png) |
+
+| Preferences | Book Room |
+|:---:|:---:|
+| ![Teacher Preferences](screenshots/teacher_portal/teacher_preferences.png) | ![Teacher Book Room](screenshots/teacher_portal/teacher_book_room.png) |
+
+| Notifications |
+|:---:|
+| ![Teacher Notifications](screenshots/teacher_portal/teacher_notification.png) |
+
+### Student Portal
+| Dashboard | Course Planner |
+|:---:|:---:|
+| ![Student Dashboard](screenshots/student_portal/student_dashboard.png) | ![Student Course Planner](screenshots/student_portal/student_course_planner.png) |
+
+| My Schedule | Book Room |
+|:---:|:---:|
+| ![Student Schedule](screenshots/student_portal/student_my_schedule.png) | ![Student Book Room](screenshots/student_portal/student_book_room.png) |
+
+| Notifications |
+|:---:|
+| ![Student Notifications](screenshots/student_portal/student_notifications.png) |
+
+
 ## Project Overview
 This project is a Class Schedule Management System designed to help manage and organize academic schedules. It leverages a modern tech stack including AI capabilities for enhanced functionality.
 
@@ -598,4 +653,5 @@ MISTRAL_API_KEY=your_mistral_api_key
         - `GET /settings/current_semester`: Get the current semester value.
         - `PUT /settings/current_semester`: Update the current semester value (Admin only).
 - **GET /**: Root endpoint to verify the backend is running.
+
 
