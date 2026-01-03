@@ -3,52 +3,88 @@
 ## Project Screenshots
 
 ### General
-| Home Page | Login Page |
-|:---:|:---:|
-| ![Home Page](screenshots/home_page.png) | ![Login Page](screenshots/login_page.png) |
+| Home Page |
+|:---:|
+| ![Home Page](screenshots/home_page.png) |
+
+| Login Page |
+|:---:|
+| ![Login Page](screenshots/login_page.png) |
 
 | Register Page |
 |:---:|
 | ![Register Page](screenshots/register_page.png) |
 
 ### Admin Portal
-| Dashboard & Auto Schedule | Manage Teachers |
-|:---:|:---:|
-| ![Admin Dashboard](screenshots/admin_portal/admin_auto_schedule.png) | ![Manage Teachers](screenshots/admin_portal/admin_manage_teacher.png) |
+| Dashboard |
+|:---:|
+| ![Admin Dashboard](screenshots/admin_portal/admin_dashboard.png) |
 
-| Manage Courses | Manage Rooms |
-|:---:|:---:|
-| ![Manage Courses](screenshots/admin_portal/admin_manage_courses.png) | ![Manage Rooms](screenshots/admin_portal/admin_manage_rooms.png) |
+| Auto Schedule |
+|:---:|
+| ![Manage Schedules](screenshots/admin_portal/admin_auto_schedule.png) |
 
-| Manage Preferences | Manage Bookings |
-|:---:|:---:|
-| ![Manage Preferences](screenshots/admin_portal/admin_manage_preferences.png) | ![Manage Bookings](screenshots/admin_portal/admin_manage_bookings.png) |
+| Manage Teachers |
+|:---:|
+| ![Manage Teachers](screenshots/admin_portal/admin_manage_teacher.png) |
+
+| Manage Courses |
+|:---:|
+| ![Manage Courses](screenshots/admin_portal/admin_manage_courses.png) |
+
+| Manage Rooms |
+|:---:|
+| ![Manage Rooms](screenshots/admin_portal/admin_manage_rooms.png) |
+
+| Manage Preferences |
+|:---:|
+| ![Manage Preferences](screenshots/admin_portal/admin_manage_preferences.png) |
+
+| Manage Bookings |
+|:---:|
+| ![Manage Bookings](screenshots/admin_portal/admin_manage_bookings.png) |
 
 | Manage Notifications |
 |:---:|
 | ![Manage Notifications](screenshots/admin_portal/admin_manage_notifications.png) |
 
 ### Teacher Portal
-| Dashboard | My Schedule |
-|:---:|:---:|
-| ![Teacher Dashboard](screenshots/teacher_portal/teacher_dashboard.png) | ![Teacher Schedule](screenshots/teacher_portal/teacher_my_schedule.png) |
+| Dashboard |
+|:---:|
+| ![Teacher Dashboard](screenshots/teacher_portal/teacher_dashboard.png) |
 
-| Preferences | Book Room |
-|:---:|:---:|
-| ![Teacher Preferences](screenshots/teacher_portal/teacher_preferences.png) | ![Teacher Book Room](screenshots/teacher_portal/teacher_book_room.png) |
+| My Schedule |
+|:---:|
+| ![Teacher Schedule](screenshots/teacher_portal/teacher_my_schedule.png) |
+
+| Preferences |
+|:---:|
+| ![Teacher Preferences](screenshots/teacher_portal/teacher_preferences.png) |
+
+| Book Room |
+|:---:|
+| ![Teacher Book Room](screenshots/teacher_portal/teacher_book_room.png) |
 
 | Notifications |
 |:---:|
 | ![Teacher Notifications](screenshots/teacher_portal/teacher_notification.png) |
 
 ### Student Portal
-| Dashboard | Course Planner |
-|:---:|:---:|
-| ![Student Dashboard](screenshots/student_portal/student_dashboard.png) | ![Student Course Planner](screenshots/student_portal/student_course_planner.png) |
+| Dashboard |
+|:---:|
+| ![Student Dashboard](screenshots/student_portal/student_dashboard.png) |
 
-| My Schedule | Book Room |
-|:---:|:---:|
-| ![Student Schedule](screenshots/student_portal/student_my_schedule.png) | ![Student Book Room](screenshots/student_portal/student_book_room.png) |
+| Course Planner |
+|:---:|
+| ![Student Course Planner](screenshots/student_portal/student_course_planner.png) |
+
+| My Schedule |
+|:---:|
+| ![Student Schedule](screenshots/student_portal/student_my_schedule.png) |
+
+| Book Room |
+|:---:|
+| ![Student Book Room](screenshots/student_portal/student_book_room.png) |
 
 | Notifications |
 |:---:|
