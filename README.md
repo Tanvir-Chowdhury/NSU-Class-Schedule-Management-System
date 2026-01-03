@@ -15,6 +15,10 @@
 |:---:|
 | ![Register Page](screenshots/register_page.png) |
 
+| AI Assistant |
+|:---:|
+| ![AI Assistant](screenshots/ai_assistant.png) |
+
 ### Admin Portal
 | Dashboard |
 |:---:|
