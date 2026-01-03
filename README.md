@@ -17,7 +17,7 @@
 
 | AI Assistant |
 |:---:|
-| ![AI Assistant](screenshots/ai_assistant.png) |
+| ![AI Assistant](screenshots/AI_assistant.png) |
 
 ### Admin Portal
 | Dashboard |
